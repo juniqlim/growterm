@@ -50,11 +50,11 @@ fn resolve_color(color: Color, default: Rgb) -> Rgb {
 pub fn generate(cells: &[Vec<Cell>]) -> Vec<RenderCommand> {
     let mut commands = Vec::new();
     for (row, line) in cells.iter().enumerate() {
-        let mut col = 0u16;
-        for cell in line {
-            // Skip spacer cells after wide characters
-            if col > 0 && col as usize > 0 {
-                // Check if previous cell was wide - spacer detection handled by caller
+        let mut skip_next = false;
+        for (col, cell) in line.iter().enumerate() {
+            if skip_next {
+                skip_next = false;
+                continue;
             }
 
             let mut fg = resolve_color(cell.fg, DEFAULT_FG);
@@ -76,7 +76,7 @@ pub fn generate(cells: &[Vec<Cell>]) -> Vec<RenderCommand> {
             }
 
             commands.push(RenderCommand {
-                col,
+                col: col as u16,
                 row: row as u16,
                 character: cell.character,
                 fg,
@@ -84,7 +84,9 @@ pub fn generate(cells: &[Vec<Cell>]) -> Vec<RenderCommand> {
                 flags: cell.flags,
             });
 
-            col += if cell.flags.contains(CellFlags::WIDE_CHAR) { 2 } else { 1 };
+            if cell.flags.contains(CellFlags::WIDE_CHAR) {
+                skip_next = true;
+            }
         }
     }
     commands
@@ -204,7 +206,8 @@ mod tests {
     }
 
     #[test]
-    fn wide_char_advances_two_columns() {
+    fn wide_char_with_spacer_skips_spacer() {
+        // Fixed-width grid format: wide char + spacer cell
         let cells = vec![vec![
             Cell {
                 character: '한',
@@ -212,16 +215,21 @@ mod tests {
                 bg: Color::Default,
                 flags: CellFlags::WIDE_CHAR,
             },
+            Cell::default(), // spacer
             Cell {
                 character: '글',
                 fg: Color::Default,
                 bg: Color::Default,
                 flags: CellFlags::WIDE_CHAR,
             },
+            Cell::default(), // spacer
         ]];
         let cmds = generate(&cells);
+        assert_eq!(cmds.len(), 2); // spacers skipped
         assert_eq!(cmds[0].col, 0);
+        assert_eq!(cmds[0].character, '한');
         assert_eq!(cmds[1].col, 2);
+        assert_eq!(cmds[1].character, '글');
     }
 
     #[test]

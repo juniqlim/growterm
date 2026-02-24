@@ -1,0 +1,8 @@
+[package]
+name = "juniqterm-grid"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+juniqterm-types = { path = "../juniqterm-types" }
+unicode-width = "0.2"
