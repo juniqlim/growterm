@@ -63,5 +63,14 @@
 - $SHELL 환경변수 기반 셸 선택 (fallback: /bin/sh)
 - 4 integration tests (echo, resize, unicode, exit)
 
-## Phase 6: Input Handler — NEXT
+## Phase 6: Input Handler — DONE
+- 순수 함수: `KeyEvent → Vec<u8>`
+- 일반 문자: ASCII + 유니코드 (UTF-8 인코딩)
+- 특수 키: Enter(\r), Tab(\t), Escape(0x1b), Backspace(0x7f)
+- 이스케이프 시퀀스: Delete(3~), Arrow(A/B/C/D), Home(H), End(F), PageUp(5~), PageDown(6~)
+- Ctrl+알파벳: 0x01~0x1A (대소문자 무관)
+- Alt: ESC prefix (문자), xterm modifier param (특수키)
+- 수정자 조합: Shift/Alt/Ctrl → xterm-style modifier parameter (CSI 1;{n} {letter})
+- 32 unit tests
+
 ## Phase 7: App (connect all) — TODO
