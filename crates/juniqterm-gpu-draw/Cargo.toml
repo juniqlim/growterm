@@ -13,3 +13,9 @@ pollster = "0.4"
 
 [[example]]
 name = "hardcoded_grid"
+
+[[example]]
+name = "integration_render_cmd"
+
+[dev-dependencies]
+juniqterm-render-cmd = { path = "../juniqterm-render-cmd" }
