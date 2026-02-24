@@ -47,7 +47,7 @@ fn resolve_color(color: Color, default: Rgb) -> Rgb {
     }
 }
 
-pub fn generate(cells: &[Vec<Cell>]) -> Vec<RenderCommand> {
+pub fn generate(cells: &[Vec<Cell>], cursor_pos: Option<(u16, u16)>) -> Vec<RenderCommand> {
     let mut commands = Vec::new();
     for (row, line) in cells.iter().enumerate() {
         let mut skip_next = false;
@@ -59,6 +59,12 @@ pub fn generate(cells: &[Vec<Cell>]) -> Vec<RenderCommand> {
 
             let mut fg = resolve_color(cell.fg, DEFAULT_FG);
             let mut bg = resolve_color(cell.bg, DEFAULT_BG);
+
+            // Cursor: swap fg/bg at cursor position
+            let is_cursor = cursor_pos == Some((row as u16, col as u16));
+            if is_cursor {
+                std::mem::swap(&mut fg, &mut bg);
+            }
 
             // INVERSE: swap fg/bg
             if cell.flags.contains(CellFlags::INVERSE) {
@@ -99,14 +105,14 @@ mod tests {
     #[test]
     fn empty_grid_produces_no_commands() {
         let cells: Vec<Vec<Cell>> = vec![];
-        let cmds = generate(&cells);
+        let cmds = generate(&cells, None);
         assert!(cmds.is_empty());
     }
 
     #[test]
     fn single_default_cell() {
         let cells = vec![vec![Cell::default()]];
-        let cmds = generate(&cells);
+        let cmds = generate(&cells, None);
         assert_eq!(cmds.len(), 1);
         assert_eq!(cmds[0].col, 0);
         assert_eq!(cmds[0].row, 0);
@@ -123,7 +129,7 @@ mod tests {
             bg: Color::Rgb(Rgb::new(10, 20, 30)),
             flags: CellFlags::empty(),
         };
-        let cmds = generate(&vec![vec![cell]]);
+        let cmds = generate(&vec![vec![cell]], None);
         assert_eq!(cmds[0].fg, Rgb::new(100, 150, 200));
         assert_eq!(cmds[0].bg, Rgb::new(10, 20, 30));
     }
@@ -136,7 +142,7 @@ mod tests {
             bg: Color::Indexed(4), // blue
             flags: CellFlags::empty(),
         };
-        let cmds = generate(&vec![vec![cell]]);
+        let cmds = generate(&vec![vec![cell]], None);
         assert_eq!(cmds[0].fg, Rgb::new(204, 0, 0));
         assert_eq!(cmds[0].bg, Rgb::new(0, 0, 204));
     }
@@ -150,7 +156,7 @@ mod tests {
             bg: Color::Default,
             flags: CellFlags::empty(),
         };
-        let cmds = generate(&vec![vec![cell]]);
+        let cmds = generate(&vec![vec![cell]], None);
         assert_eq!(cmds[0].fg, Rgb::new(255, 0, 0));
     }
 
@@ -163,7 +169,7 @@ mod tests {
             bg: Color::Indexed(255),
             flags: CellFlags::empty(),
         };
-        let cmds = generate(&vec![vec![cell]]);
+        let cmds = generate(&vec![vec![cell]], None);
         assert_eq!(cmds[0].fg, Rgb::new(8, 8, 8));
         assert_eq!(cmds[0].bg, Rgb::new(238, 238, 238));
     }
@@ -176,7 +182,7 @@ mod tests {
             bg: Color::Rgb(Rgb::new(0, 0, 0)),
             flags: CellFlags::INVERSE,
         };
-        let cmds = generate(&vec![vec![cell]]);
+        let cmds = generate(&vec![vec![cell]], None);
         assert_eq!(cmds[0].fg, Rgb::new(0, 0, 0));
         assert_eq!(cmds[0].bg, Rgb::new(255, 255, 255));
     }
@@ -189,7 +195,7 @@ mod tests {
             bg: Color::Default,
             flags: CellFlags::DIM,
         };
-        let cmds = generate(&vec![vec![cell]]);
+        let cmds = generate(&vec![vec![cell]], None);
         assert_eq!(cmds[0].fg, Rgb::new(100, 50, 25));
     }
 
@@ -201,7 +207,7 @@ mod tests {
             bg: Color::Rgb(Rgb::new(0, 0, 0)),
             flags: CellFlags::HIDDEN,
         };
-        let cmds = generate(&vec![vec![cell]]);
+        let cmds = generate(&vec![vec![cell]], None);
         assert_eq!(cmds[0].fg, cmds[0].bg);
     }
 
@@ -224,7 +230,7 @@ mod tests {
             },
             Cell::default(), // spacer
         ]];
-        let cmds = generate(&cells);
+        let cmds = generate(&cells, None);
         assert_eq!(cmds.len(), 2); // spacers skipped
         assert_eq!(cmds[0].col, 0);
         assert_eq!(cmds[0].character, '한');
@@ -239,11 +245,41 @@ mod tests {
             vec![Cell { character: 'B', ..Cell::default() }],
             vec![Cell { character: 'C', ..Cell::default() }],
         ];
-        let cmds = generate(&cells);
+        let cmds = generate(&cells, None);
         assert_eq!(cmds.len(), 3);
         assert_eq!(cmds[0].row, 0);
         assert_eq!(cmds[1].row, 1);
         assert_eq!(cmds[2].row, 2);
+    }
+
+    #[test]
+    fn cursor_pos_swaps_fg_bg() {
+        let cell = Cell {
+            character: 'A',
+            fg: Color::Default,
+            bg: Color::Default,
+            flags: CellFlags::empty(),
+        };
+        let cells = vec![vec![cell]];
+        let cmds = generate(&cells, Some((0, 0)));
+        // fg and bg should be swapped at cursor position
+        assert_eq!(cmds[0].fg, DEFAULT_BG);
+        assert_eq!(cmds[0].bg, DEFAULT_FG);
+    }
+
+    #[test]
+    fn cursor_pos_only_affects_cursor_cell() {
+        let cells = vec![vec![
+            Cell { character: 'A', ..Cell::default() },
+            Cell { character: 'B', ..Cell::default() },
+        ]];
+        let cmds = generate(&cells, Some((0, 0)));
+        // Cell at cursor: swapped
+        assert_eq!(cmds[0].fg, DEFAULT_BG);
+        assert_eq!(cmds[0].bg, DEFAULT_FG);
+        // Cell not at cursor: normal
+        assert_eq!(cmds[1].fg, DEFAULT_FG);
+        assert_eq!(cmds[1].bg, DEFAULT_BG);
     }
 
     #[test]
@@ -254,7 +290,7 @@ mod tests {
             bg: Color::Default,
             flags: CellFlags::BOLD | CellFlags::UNDERLINE,
         };
-        let cmds = generate(&vec![vec![cell]]);
+        let cmds = generate(&vec![vec![cell]], None);
         assert!(cmds[0].flags.contains(CellFlags::BOLD));
         assert!(cmds[0].flags.contains(CellFlags::UNDERLINE));
     }

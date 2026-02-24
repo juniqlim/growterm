@@ -30,6 +30,7 @@ pub struct App {
     terminal: Option<Arc<Mutex<TerminalState>>>,
     dirty: Arc<AtomicBool>,
     modifiers: ModifiersState,
+    font_size: f32,
 }
 
 impl App {
@@ -42,6 +43,7 @@ impl App {
             terminal: None,
             dirty: Arc::new(AtomicBool::new(false)),
             modifiers: ModifiersState::empty(),
+            font_size: FONT_SIZE,
         }
     }
 
@@ -149,6 +151,39 @@ impl ApplicationHandler<()> for App {
                 self.modifiers = new_modifiers.state();
             }
             WindowEvent::KeyboardInput { event, .. } => {
+                // Cmd+=/- for font size zoom
+                if self.modifiers.super_key()
+                    && event.state == winit::event::ElementState::Pressed
+                {
+                    let zoom = match &event.logical_key {
+                        winit::keyboard::Key::Character(s) if s.as_str() == "=" || s.as_str() == "+" => Some(2.0f32),
+                        winit::keyboard::Key::Character(s) if s.as_str() == "-" => Some(-2.0f32),
+                        _ => None,
+                    };
+                    if let Some(delta) = zoom {
+                        self.font_size = (self.font_size + delta).clamp(8.0, 72.0);
+                        if let (Some(drawer), Some(window)) =
+                            (&mut self.drawer, &self.window)
+                        {
+                            drawer.set_font_size(self.font_size);
+                            let (cell_w, cell_h) = drawer.cell_size();
+                            let size = window.inner_size();
+                            let cols = (size.width as f32 / cell_w).floor() as u16;
+                            let rows = (size.height as f32 / cell_h).floor() as u16;
+                            let cols = cols.max(1);
+                            let rows = rows.max(1);
+                            if let Some(terminal) = &self.terminal {
+                                terminal.lock().unwrap().grid.resize(cols, rows);
+                            }
+                            if let Some(writer) = &self.pty_writer {
+                                let _ = writer.resize(rows, cols);
+                            }
+                            window.request_redraw();
+                        }
+                        return;
+                    }
+                }
+
                 if let Some(key_event) =
                     convert_key(&event.logical_key, event.state, self.modifiers)
                 {
@@ -186,7 +221,8 @@ impl ApplicationHandler<()> for App {
                         (&mut self.drawer, &self.terminal)
                     {
                         let state = terminal.lock().unwrap();
-                        let commands = juniqterm_render_cmd::generate(state.grid.cells());
+                        let cursor = state.grid.cursor_pos();
+                        let commands = juniqterm_render_cmd::generate(state.grid.cells(), Some(cursor));
                         drop(state);
                         drawer.draw(&commands);
                     }
@@ -195,7 +231,8 @@ impl ApplicationHandler<()> for App {
                 if let (Some(drawer), Some(terminal)) = (&mut self.drawer, &self.terminal)
                 {
                     let state = terminal.lock().unwrap();
-                    let commands = juniqterm_render_cmd::generate(state.grid.cells());
+                    let cursor = state.grid.cursor_pos();
+                    let commands = juniqterm_render_cmd::generate(state.grid.cells(), Some(cursor));
                     drop(state);
                     drawer.draw(&commands);
                 }

@@ -501,3 +501,26 @@ fn resize_clamps_cursor() {
     // Cursor should be clamped to (4,4)
     assert_eq!(grid.cells()[4][4].character, 'C');
 }
+
+// === Step 9: cursor_pos ===
+
+#[test]
+fn cursor_pos_initial() {
+    let grid = Grid::new(80, 24);
+    assert_eq!(grid.cursor_pos(), (0, 0));
+}
+
+#[test]
+fn cursor_pos_after_print() {
+    let mut grid = Grid::new(80, 24);
+    grid.apply(&TerminalCommand::Print('A'));
+    grid.apply(&TerminalCommand::Print('B'));
+    assert_eq!(grid.cursor_pos(), (0, 2));
+}
+
+#[test]
+fn cursor_pos_after_cursor_position() {
+    let mut grid = Grid::new(80, 24);
+    grid.apply(&TerminalCommand::CursorPosition { row: 5, col: 10 });
+    assert_eq!(grid.cursor_pos(), (4, 9));
+}

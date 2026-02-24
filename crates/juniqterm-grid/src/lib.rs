@@ -32,6 +32,10 @@ impl Grid {
         &self.cells
     }
 
+    pub fn cursor_pos(&self) -> (u16, u16) {
+        (self.cursor_row as u16, self.cursor_col as u16)
+    }
+
     pub fn apply(&mut self, cmd: &TerminalCommand) {
         match cmd {
             TerminalCommand::Print(c) => self.print(*c),

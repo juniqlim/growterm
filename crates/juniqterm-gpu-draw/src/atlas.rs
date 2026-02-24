@@ -54,6 +54,19 @@ impl GlyphAtlas {
         }
     }
 
+    pub fn set_size(&mut self, size: f32) {
+        self.size = size;
+        self.cache.clear();
+
+        let metrics = self.font.metrics('M', size);
+        let line_metrics = self.font.horizontal_line_metrics(size);
+        self.cell_height = match line_metrics {
+            Some(lm) => lm.new_line_size,
+            None => metrics.height as f32,
+        };
+        self.cell_width = metrics.advance_width;
+    }
+
     pub fn cell_size(&self) -> (f32, f32) {
         (self.cell_width, self.cell_height)
     }

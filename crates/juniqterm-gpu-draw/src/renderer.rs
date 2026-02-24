@@ -316,6 +316,14 @@ impl GpuDrawer {
         }
     }
 
+    pub fn set_font_size(&mut self, size: f32) {
+        self.atlas.set_size(size);
+        self.glyph_regions.clear();
+        self.atlas_cursor_x = 0;
+        self.atlas_cursor_y = 0;
+        self.atlas_row_height = 0;
+    }
+
     pub fn resize(&mut self, width: u32, height: u32) {
         if width == 0 || height == 0 {
             return;
