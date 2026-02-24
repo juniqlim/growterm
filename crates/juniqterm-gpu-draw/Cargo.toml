@@ -17,5 +17,10 @@ name = "hardcoded_grid"
 [[example]]
 name = "integration_render_cmd"
 
+[[example]]
+name = "integration_vt_parser"
+
 [dev-dependencies]
 juniqterm-render-cmd = { path = "../juniqterm-render-cmd" }
+juniqterm-vt-parser = { path = "../juniqterm-vt-parser" }
+juniqterm-grid = { path = "../juniqterm-grid" }
