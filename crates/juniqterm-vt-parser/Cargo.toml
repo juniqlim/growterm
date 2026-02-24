@@ -1,0 +1,8 @@
+[package]
+name = "juniqterm-vt-parser"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+juniqterm-types = { path = "../juniqterm-types" }
+vte = "0.13"
