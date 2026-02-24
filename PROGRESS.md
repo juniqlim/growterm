@@ -73,4 +73,15 @@
 - 수정자 조합: Shift/Alt/Ctrl → xterm-style modifier parameter (CSI 1;{n} {letter})
 - 32 unit tests
 
-## Phase 7: App (connect all) — TODO
+## Phase 7: App — DONE
+- 모든 모듈 연결: KeyboardInput → PTY → VtParser → Grid → RenderCmd → GpuDrawer
+- key_convert: winit Key → juniqterm KeyEvent 변환 (20 unit tests)
+- App struct: ApplicationHandler<()> 구현
+  - resumed(): 윈도우 → GpuDrawer → cell_size 기반 cols/rows → Grid → PTY spawn → IO thread
+  - IO thread: read → parse → apply → dirty flag → proxy.send_event(())
+  - KeyboardInput: convert_key() → encode() → pty_writer.write_all()
+  - Resized: drawer.resize() → grid.resize() → pty_writer.resize()
+  - RedrawRequested: generate(grid.cells()) → drawer.draw()
+- 공유 상태: Arc<Mutex<TerminalState>> (Grid + VtParser)
+- EIO 처리: macOS 셸 종료 시 정상 종료
+- 전체 워크스페이스 175 tests 통과
