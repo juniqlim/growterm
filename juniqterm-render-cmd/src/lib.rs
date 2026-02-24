@@ -283,6 +283,97 @@ mod tests {
     }
 
     #[test]
+    fn cursor_with_custom_rgb_swaps_fg_bg() {
+        let cell = Cell {
+            character: 'X',
+            fg: Color::Rgb(Rgb::new(100, 150, 200)),
+            bg: Color::Rgb(Rgb::new(10, 20, 30)),
+            flags: CellFlags::empty(),
+        };
+        let cmds = generate(&vec![vec![cell]], Some((0, 0)));
+        assert_eq!(cmds[0].fg, Rgb::new(10, 20, 30));
+        assert_eq!(cmds[0].bg, Rgb::new(100, 150, 200));
+    }
+
+    #[test]
+    fn cursor_plus_inverse_cancels_out() {
+        // cursor swaps, then INVERSE swaps again → back to original
+        let cell = Cell {
+            character: 'I',
+            fg: Color::Rgb(Rgb::new(255, 255, 255)),
+            bg: Color::Rgb(Rgb::new(0, 0, 0)),
+            flags: CellFlags::INVERSE,
+        };
+        let cmds = generate(&vec![vec![cell]], Some((0, 0)));
+        assert_eq!(cmds[0].fg, Rgb::new(255, 255, 255));
+        assert_eq!(cmds[0].bg, Rgb::new(0, 0, 0));
+    }
+
+    #[test]
+    fn cursor_on_wide_char() {
+        let cells = vec![vec![
+            Cell {
+                character: '한',
+                fg: Color::Default,
+                bg: Color::Default,
+                flags: CellFlags::WIDE_CHAR,
+            },
+            Cell::default(), // spacer
+        ]];
+        let cmds = generate(&cells, Some((0, 0)));
+        // Wide char at cursor: fg/bg swapped
+        assert_eq!(cmds[0].fg, DEFAULT_BG);
+        assert_eq!(cmds[0].bg, DEFAULT_FG);
+    }
+
+    #[test]
+    fn cursor_out_of_bounds_no_effect() {
+        let cells = vec![vec![Cell::default()]];
+        // cursor at (5,5) but grid is 1x1
+        let cmds = generate(&cells, Some((5, 5)));
+        assert_eq!(cmds[0].fg, DEFAULT_FG);
+        assert_eq!(cmds[0].bg, DEFAULT_BG);
+    }
+
+    #[test]
+    fn cursor_none_no_swap() {
+        let cells = vec![vec![Cell::default()]];
+        let cmds = generate(&cells, None);
+        assert_eq!(cmds[0].fg, DEFAULT_FG);
+        assert_eq!(cmds[0].bg, DEFAULT_BG);
+    }
+
+    #[test]
+    fn cursor_with_dim_applies_dim_after_swap() {
+        let cell = Cell {
+            character: 'D',
+            fg: Color::Rgb(Rgb::new(200, 100, 50)),
+            bg: Color::Rgb(Rgb::new(40, 60, 80)),
+            flags: CellFlags::DIM,
+        };
+        let cmds = generate(&vec![vec![cell]], Some((0, 0)));
+        // cursor swaps: fg=40,60,80 bg=200,100,50
+        // DIM halves fg: 20,30,40
+        assert_eq!(cmds[0].fg, Rgb::new(20, 30, 40));
+        assert_eq!(cmds[0].bg, Rgb::new(200, 100, 50));
+    }
+
+    #[test]
+    fn cursor_on_second_row() {
+        let cells = vec![
+            vec![Cell { character: 'A', ..Cell::default() }],
+            vec![Cell { character: 'B', ..Cell::default() }],
+        ];
+        let cmds = generate(&cells, Some((1, 0)));
+        // Row 0: normal
+        assert_eq!(cmds[0].fg, DEFAULT_FG);
+        assert_eq!(cmds[0].bg, DEFAULT_BG);
+        // Row 1: swapped
+        assert_eq!(cmds[1].fg, DEFAULT_BG);
+        assert_eq!(cmds[1].bg, DEFAULT_FG);
+    }
+
+    #[test]
     fn flags_are_preserved() {
         let cell = Cell {
             character: 'B',

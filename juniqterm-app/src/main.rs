@@ -1,5 +1,6 @@
 mod app;
 mod key_convert;
+mod zoom;
 
 use app::App;
 use winit::event_loop::EventLoop;

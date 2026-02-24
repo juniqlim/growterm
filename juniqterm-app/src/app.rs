@@ -14,6 +14,7 @@ use juniqterm_pty::PtyWriter;
 use juniqterm_vt_parser::VtParser;
 
 use crate::key_convert::convert_key;
+use crate::zoom;
 
 const FONT_SIZE: f32 = 24.0;
 
@@ -100,10 +101,9 @@ impl ApplicationHandler<()> for App {
         let size = window.inner_size();
         drawer.resize(size.width, size.height);
 
-        let cols = (size.width as f32 / cell_w).floor() as u16;
-        let rows = (size.height as f32 / cell_h).floor() as u16;
-        let cols = cols.max(1);
-        let rows = rows.max(1);
+        let (cols, rows) = zoom::calc_grid_size(
+            size.width, size.height, cell_w, cell_h,
+        );
 
         let grid = Grid::new(cols, rows);
         let vt_parser = VtParser::new();
@@ -155,23 +155,22 @@ impl ApplicationHandler<()> for App {
                 if self.modifiers.super_key()
                     && event.state == winit::event::ElementState::Pressed
                 {
-                    let zoom = match &event.logical_key {
-                        winit::keyboard::Key::Character(s) if s.as_str() == "=" || s.as_str() == "+" => Some(2.0f32),
-                        winit::keyboard::Key::Character(s) if s.as_str() == "-" => Some(-2.0f32),
+                    let key_str = match &event.logical_key {
+                        winit::keyboard::Key::Character(s) => Some(s.as_str()),
                         _ => None,
                     };
-                    if let Some(delta) = zoom {
-                        self.font_size = (self.font_size + delta).clamp(8.0, 72.0);
+                    let delta = key_str.and_then(zoom::zoom_delta);
+                    if let Some(delta) = delta {
+                        self.font_size = zoom::apply_zoom(self.font_size, delta);
                         if let (Some(drawer), Some(window)) =
                             (&mut self.drawer, &self.window)
                         {
                             drawer.set_font_size(self.font_size);
                             let (cell_w, cell_h) = drawer.cell_size();
                             let size = window.inner_size();
-                            let cols = (size.width as f32 / cell_w).floor() as u16;
-                            let rows = (size.height as f32 / cell_h).floor() as u16;
-                            let cols = cols.max(1);
-                            let rows = rows.max(1);
+                            let (cols, rows) = zoom::calc_grid_size(
+                                size.width, size.height, cell_w, cell_h,
+                            );
                             if let Some(terminal) = &self.terminal {
                                 terminal.lock().unwrap().grid.resize(cols, rows);
                             }
@@ -198,10 +197,9 @@ impl ApplicationHandler<()> for App {
                 if let Some(drawer) = &mut self.drawer {
                     drawer.resize(size.width, size.height);
                     let (cell_w, cell_h) = drawer.cell_size();
-                    let cols = (size.width as f32 / cell_w).floor() as u16;
-                    let rows = (size.height as f32 / cell_h).floor() as u16;
-                    let cols = cols.max(1);
-                    let rows = rows.max(1);
+                    let (cols, rows) = zoom::calc_grid_size(
+                        size.width, size.height, cell_w, cell_h,
+                    );
 
                     if let Some(terminal) = &self.terminal {
                         terminal.lock().unwrap().grid.resize(cols, rows);
