@@ -1,0 +1,15 @@
+[package]
+name = "juniqterm-app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+juniqterm-types = { path = "../juniqterm-types" }
+juniqterm-gpu-draw = { path = "../juniqterm-gpu-draw" }
+juniqterm-render-cmd = { path = "../juniqterm-render-cmd" }
+juniqterm-vt-parser = { path = "../juniqterm-vt-parser" }
+juniqterm-grid = { path = "../juniqterm-grid" }
+juniqterm-pty = { path = "../juniqterm-pty" }
+juniqterm-input = { path = "../juniqterm-input" }
+winit = "0.30"
+libc = "0.2"
