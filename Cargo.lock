@@ -726,6 +726,7 @@ name = "juniqterm-render-cmd"
 version = "0.1.0"
 dependencies = [
  "juniqterm-types",
+ "unicode-width 0.2.2",
 ]
 
 [[package]]

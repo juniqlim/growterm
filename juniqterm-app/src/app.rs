@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use winit::application::ApplicationHandler;
-use winit::event::WindowEvent;
+use winit::event::{Ime, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
 use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowId};
@@ -13,6 +13,7 @@ use juniqterm_grid::Grid;
 use juniqterm_pty::PtyWriter;
 use juniqterm_vt_parser::VtParser;
 
+use crate::event_action::{self, Action};
 use crate::key_convert::convert_key;
 use crate::zoom;
 
@@ -32,6 +33,7 @@ pub struct App {
     dirty: Arc<AtomicBool>,
     modifiers: ModifiersState,
     font_size: f32,
+    preedit_text: String,
 }
 
 impl App {
@@ -45,6 +47,7 @@ impl App {
             dirty: Arc::new(AtomicBool::new(false)),
             modifiers: ModifiersState::empty(),
             font_size: FONT_SIZE,
+            preedit_text: String::new(),
         }
     }
 
@@ -82,6 +85,29 @@ impl App {
             // Request one last redraw + exit
             let _ = proxy.send_event(());
         });
+    }
+
+    fn write_pty(&mut self, bytes: &[u8]) {
+        if let Some(writer) = &mut self.pty_writer {
+            let _ = writer.write_all(bytes);
+            let _ = writer.flush();
+        }
+    }
+
+    fn render(&mut self) {
+        if let (Some(drawer), Some(terminal)) = (&mut self.drawer, &self.terminal) {
+            let state = terminal.lock().unwrap();
+            let cursor = state.grid.cursor_pos();
+            let preedit = if self.preedit_text.is_empty() {
+                None
+            } else {
+                Some(self.preedit_text.as_str())
+            };
+            let commands =
+                juniqterm_render_cmd::generate(state.grid.cells(), Some(cursor), preedit);
+            drop(state);
+            drawer.draw(&commands);
+        }
     }
 }
 
@@ -128,6 +154,11 @@ impl ApplicationHandler<()> for App {
 
         self.terminal = Some(terminal);
         self.drawer = Some(drawer);
+        window.set_ime_allowed(true);
+        window.set_ime_cursor_area(
+            winit::dpi::PhysicalPosition::new(0, 0),
+            winit::dpi::PhysicalSize::new(0, 0),
+        );
         self.window = Some(window);
     }
 
@@ -150,6 +181,32 @@ impl ApplicationHandler<()> for App {
             WindowEvent::ModifiersChanged(new_modifiers) => {
                 self.modifiers = new_modifiers.state();
             }
+            WindowEvent::Ime(ime) => match ime {
+                Ime::Preedit(text, _) => {
+                    eprintln!("[IME] Preedit: {:?}", text);
+                    match event_action::handle_ime_preedit(&text) {
+                        Action::SetPreedit(s) => self.preedit_text = s,
+                        _ => {}
+                    }
+                    if let Some(window) = &self.window {
+                        window.request_redraw();
+                    }
+                }
+                Ime::Commit(text) => {
+                    eprintln!("[IME] Commit: {:?}", text);
+                    self.preedit_text.clear();
+                    match event_action::handle_ime_commit(&text) {
+                        Action::WritePty(bytes) => self.write_pty(&bytes),
+                        _ => {}
+                    }
+                }
+                Ime::Enabled => {
+                    eprintln!("[IME] Enabled");
+                }
+                Ime::Disabled => {
+                    eprintln!("[IME] Disabled");
+                }
+            },
             WindowEvent::KeyboardInput { event, .. } => {
                 // Cmd+=/- for font size zoom
                 if self.modifiers.super_key()
@@ -183,13 +240,39 @@ impl ApplicationHandler<()> for App {
                     }
                 }
 
+                if event.state != winit::event::ElementState::Pressed {
+                    return;
+                }
+
+                let is_plain_char = matches!(
+                    &event.logical_key,
+                    winit::keyboard::Key::Character(_)
+                ) && !self.modifiers.control_key()
+                    && !self.modifiers.alt_key();
+
+                eprintln!(
+                    "[KEY] logical={:?} text={:?} is_plain_char={} preedit={:?}",
+                    event.logical_key, event.text, is_plain_char, self.preedit_text
+                );
+
+                if is_plain_char {
+                    if let Some(action) = event_action::handle_plain_char_input(
+                        event.text.as_ref().map(|t| t.as_str()),
+                        !self.preedit_text.is_empty(),
+                    ) {
+                        match action {
+                            Action::WritePty(bytes) => self.write_pty(&bytes),
+                            _ => {}
+                        }
+                    }
+                    return;
+                }
                 if let Some(key_event) =
                     convert_key(&event.logical_key, event.state, self.modifiers)
                 {
-                    let bytes = juniqterm_input::encode(key_event);
-                    if let Some(writer) = &mut self.pty_writer {
-                        let _ = writer.write_all(&bytes);
-                        let _ = writer.flush();
+                    match event_action::handle_keyboard_input(key_event) {
+                        Action::WritePty(bytes) => self.write_pty(&bytes),
+                        _ => {}
                     }
                 }
             }
@@ -213,27 +296,8 @@ impl ApplicationHandler<()> for App {
                 }
             }
             WindowEvent::RedrawRequested => {
-                if !self.dirty.swap(false, Ordering::Relaxed) {
-                    // Still draw on first frame or resize
-                    if let (Some(drawer), Some(terminal)) =
-                        (&mut self.drawer, &self.terminal)
-                    {
-                        let state = terminal.lock().unwrap();
-                        let cursor = state.grid.cursor_pos();
-                        let commands = juniqterm_render_cmd::generate(state.grid.cells(), Some(cursor));
-                        drop(state);
-                        drawer.draw(&commands);
-                    }
-                    return;
-                }
-                if let (Some(drawer), Some(terminal)) = (&mut self.drawer, &self.terminal)
-                {
-                    let state = terminal.lock().unwrap();
-                    let cursor = state.grid.cursor_pos();
-                    let commands = juniqterm_render_cmd::generate(state.grid.cells(), Some(cursor));
-                    drop(state);
-                    drawer.draw(&commands);
-                }
+                self.dirty.swap(false, Ordering::Relaxed);
+                self.render();
             }
             _ => {}
         }

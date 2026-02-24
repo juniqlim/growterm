@@ -98,7 +98,7 @@ impl ApplicationHandler for App {
             WindowEvent::RedrawRequested => {
                 if let Some(drawer) = &mut self.drawer {
                     // Integration pipeline: Cell → generate() → draw()
-                    let commands = generate(&self.grid, None);
+                    let commands = generate(&self.grid, None, None);
                     drawer.draw(&commands);
                 }
             }

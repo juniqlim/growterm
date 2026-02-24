@@ -1,4 +1,5 @@
 use juniqterm_types::{Cell, CellFlags, Color, RenderCommand, Rgb};
+use unicode_width::UnicodeWidthChar;
 
 const DEFAULT_FG: Rgb = Rgb { r: 204, g: 204, b: 204 };
 const DEFAULT_BG: Rgb = Rgb { r: 0, g: 0, b: 0 };
@@ -47,7 +48,11 @@ fn resolve_color(color: Color, default: Rgb) -> Rgb {
     }
 }
 
-pub fn generate(cells: &[Vec<Cell>], cursor_pos: Option<(u16, u16)>) -> Vec<RenderCommand> {
+pub fn generate(
+    cells: &[Vec<Cell>],
+    cursor_pos: Option<(u16, u16)>,
+    preedit: Option<&str>,
+) -> Vec<RenderCommand> {
     let mut commands = Vec::new();
     for (row, line) in cells.iter().enumerate() {
         let mut skip_next = false;
@@ -95,6 +100,26 @@ pub fn generate(cells: &[Vec<Cell>], cursor_pos: Option<(u16, u16)>) -> Vec<Rend
             }
         }
     }
+
+    // Preedit overlay: 커서 위치에 조합 중인 텍스트를 밑줄 + 색반전으로 표시
+    if let (Some(text), Some((cursor_row, cursor_col))) = (preedit, cursor_pos) {
+        let mut col = cursor_col;
+        for ch in text.chars() {
+            let width = ch.width().unwrap_or(1) as u16;
+            let flags = CellFlags::UNDERLINE
+                | if width > 1 { CellFlags::WIDE_CHAR } else { CellFlags::empty() };
+            commands.push(RenderCommand {
+                col,
+                row: cursor_row,
+                character: ch,
+                fg: DEFAULT_BG,
+                bg: DEFAULT_FG,
+                flags,
+            });
+            col += width;
+        }
+    }
+
     commands
 }
 
@@ -105,14 +130,14 @@ mod tests {
     #[test]
     fn empty_grid_produces_no_commands() {
         let cells: Vec<Vec<Cell>> = vec![];
-        let cmds = generate(&cells, None);
+        let cmds = generate(&cells, None, None);
         assert!(cmds.is_empty());
     }
 
     #[test]
     fn single_default_cell() {
         let cells = vec![vec![Cell::default()]];
-        let cmds = generate(&cells, None);
+        let cmds = generate(&cells, None, None);
         assert_eq!(cmds.len(), 1);
         assert_eq!(cmds[0].col, 0);
         assert_eq!(cmds[0].row, 0);
@@ -129,7 +154,7 @@ mod tests {
             bg: Color::Rgb(Rgb::new(10, 20, 30)),
             flags: CellFlags::empty(),
         };
-        let cmds = generate(&vec![vec![cell]], None);
+        let cmds = generate(&vec![vec![cell]], None, None);
         assert_eq!(cmds[0].fg, Rgb::new(100, 150, 200));
         assert_eq!(cmds[0].bg, Rgb::new(10, 20, 30));
     }
@@ -142,7 +167,7 @@ mod tests {
             bg: Color::Indexed(4), // blue
             flags: CellFlags::empty(),
         };
-        let cmds = generate(&vec![vec![cell]], None);
+        let cmds = generate(&vec![vec![cell]], None, None);
         assert_eq!(cmds[0].fg, Rgb::new(204, 0, 0));
         assert_eq!(cmds[0].bg, Rgb::new(0, 0, 204));
     }
@@ -156,7 +181,7 @@ mod tests {
             bg: Color::Default,
             flags: CellFlags::empty(),
         };
-        let cmds = generate(&vec![vec![cell]], None);
+        let cmds = generate(&vec![vec![cell]], None, None);
         assert_eq!(cmds[0].fg, Rgb::new(255, 0, 0));
     }
 
@@ -169,7 +194,7 @@ mod tests {
             bg: Color::Indexed(255),
             flags: CellFlags::empty(),
         };
-        let cmds = generate(&vec![vec![cell]], None);
+        let cmds = generate(&vec![vec![cell]], None, None);
         assert_eq!(cmds[0].fg, Rgb::new(8, 8, 8));
         assert_eq!(cmds[0].bg, Rgb::new(238, 238, 238));
     }
@@ -182,7 +207,7 @@ mod tests {
             bg: Color::Rgb(Rgb::new(0, 0, 0)),
             flags: CellFlags::INVERSE,
         };
-        let cmds = generate(&vec![vec![cell]], None);
+        let cmds = generate(&vec![vec![cell]], None, None);
         assert_eq!(cmds[0].fg, Rgb::new(0, 0, 0));
         assert_eq!(cmds[0].bg, Rgb::new(255, 255, 255));
     }
@@ -195,7 +220,7 @@ mod tests {
             bg: Color::Default,
             flags: CellFlags::DIM,
         };
-        let cmds = generate(&vec![vec![cell]], None);
+        let cmds = generate(&vec![vec![cell]], None, None);
         assert_eq!(cmds[0].fg, Rgb::new(100, 50, 25));
     }
 
@@ -207,7 +232,7 @@ mod tests {
             bg: Color::Rgb(Rgb::new(0, 0, 0)),
             flags: CellFlags::HIDDEN,
         };
-        let cmds = generate(&vec![vec![cell]], None);
+        let cmds = generate(&vec![vec![cell]], None, None);
         assert_eq!(cmds[0].fg, cmds[0].bg);
     }
 
@@ -230,7 +255,7 @@ mod tests {
             },
             Cell::default(), // spacer
         ]];
-        let cmds = generate(&cells, None);
+        let cmds = generate(&cells, None, None);
         assert_eq!(cmds.len(), 2); // spacers skipped
         assert_eq!(cmds[0].col, 0);
         assert_eq!(cmds[0].character, '한');
@@ -245,7 +270,7 @@ mod tests {
             vec![Cell { character: 'B', ..Cell::default() }],
             vec![Cell { character: 'C', ..Cell::default() }],
         ];
-        let cmds = generate(&cells, None);
+        let cmds = generate(&cells, None, None);
         assert_eq!(cmds.len(), 3);
         assert_eq!(cmds[0].row, 0);
         assert_eq!(cmds[1].row, 1);
@@ -261,7 +286,7 @@ mod tests {
             flags: CellFlags::empty(),
         };
         let cells = vec![vec![cell]];
-        let cmds = generate(&cells, Some((0, 0)));
+        let cmds = generate(&cells, Some((0, 0)), None);
         // fg and bg should be swapped at cursor position
         assert_eq!(cmds[0].fg, DEFAULT_BG);
         assert_eq!(cmds[0].bg, DEFAULT_FG);
@@ -273,7 +298,7 @@ mod tests {
             Cell { character: 'A', ..Cell::default() },
             Cell { character: 'B', ..Cell::default() },
         ]];
-        let cmds = generate(&cells, Some((0, 0)));
+        let cmds = generate(&cells, Some((0, 0)), None);
         // Cell at cursor: swapped
         assert_eq!(cmds[0].fg, DEFAULT_BG);
         assert_eq!(cmds[0].bg, DEFAULT_FG);
@@ -290,7 +315,7 @@ mod tests {
             bg: Color::Rgb(Rgb::new(10, 20, 30)),
             flags: CellFlags::empty(),
         };
-        let cmds = generate(&vec![vec![cell]], Some((0, 0)));
+        let cmds = generate(&vec![vec![cell]], Some((0, 0)), None);
         assert_eq!(cmds[0].fg, Rgb::new(10, 20, 30));
         assert_eq!(cmds[0].bg, Rgb::new(100, 150, 200));
     }
@@ -304,7 +329,7 @@ mod tests {
             bg: Color::Rgb(Rgb::new(0, 0, 0)),
             flags: CellFlags::INVERSE,
         };
-        let cmds = generate(&vec![vec![cell]], Some((0, 0)));
+        let cmds = generate(&vec![vec![cell]], Some((0, 0)), None);
         assert_eq!(cmds[0].fg, Rgb::new(255, 255, 255));
         assert_eq!(cmds[0].bg, Rgb::new(0, 0, 0));
     }
@@ -320,7 +345,7 @@ mod tests {
             },
             Cell::default(), // spacer
         ]];
-        let cmds = generate(&cells, Some((0, 0)));
+        let cmds = generate(&cells, Some((0, 0)), None);
         // Wide char at cursor: fg/bg swapped
         assert_eq!(cmds[0].fg, DEFAULT_BG);
         assert_eq!(cmds[0].bg, DEFAULT_FG);
@@ -330,7 +355,7 @@ mod tests {
     fn cursor_out_of_bounds_no_effect() {
         let cells = vec![vec![Cell::default()]];
         // cursor at (5,5) but grid is 1x1
-        let cmds = generate(&cells, Some((5, 5)));
+        let cmds = generate(&cells, Some((5, 5)), None);
         assert_eq!(cmds[0].fg, DEFAULT_FG);
         assert_eq!(cmds[0].bg, DEFAULT_BG);
     }
@@ -338,7 +363,7 @@ mod tests {
     #[test]
     fn cursor_none_no_swap() {
         let cells = vec![vec![Cell::default()]];
-        let cmds = generate(&cells, None);
+        let cmds = generate(&cells, None, None);
         assert_eq!(cmds[0].fg, DEFAULT_FG);
         assert_eq!(cmds[0].bg, DEFAULT_BG);
     }
@@ -351,7 +376,7 @@ mod tests {
             bg: Color::Rgb(Rgb::new(40, 60, 80)),
             flags: CellFlags::DIM,
         };
-        let cmds = generate(&vec![vec![cell]], Some((0, 0)));
+        let cmds = generate(&vec![vec![cell]], Some((0, 0)), None);
         // cursor swaps: fg=40,60,80 bg=200,100,50
         // DIM halves fg: 20,30,40
         assert_eq!(cmds[0].fg, Rgb::new(20, 30, 40));
@@ -364,7 +389,7 @@ mod tests {
             vec![Cell { character: 'A', ..Cell::default() }],
             vec![Cell { character: 'B', ..Cell::default() }],
         ];
-        let cmds = generate(&cells, Some((1, 0)));
+        let cmds = generate(&cells, Some((1, 0)), None);
         // Row 0: normal
         assert_eq!(cmds[0].fg, DEFAULT_FG);
         assert_eq!(cmds[0].bg, DEFAULT_BG);
@@ -381,8 +406,78 @@ mod tests {
             bg: Color::Default,
             flags: CellFlags::BOLD | CellFlags::UNDERLINE,
         };
-        let cmds = generate(&vec![vec![cell]], None);
+        let cmds = generate(&vec![vec![cell]], None, None);
         assert!(cmds[0].flags.contains(CellFlags::BOLD));
         assert!(cmds[0].flags.contains(CellFlags::UNDERLINE));
+    }
+
+    // --- Preedit overlay tests ---
+
+    #[test]
+    fn preedit_none_same_as_before() {
+        let cells = vec![vec![Cell::default()]];
+        let cmds_none = generate(&cells, Some((0, 0)), None);
+        let cmds_no_preedit = generate(&cells, Some((0, 0)), None);
+        assert_eq!(cmds_none, cmds_no_preedit);
+    }
+
+    #[test]
+    fn preedit_korean_at_cursor() {
+        let cells = vec![vec![
+            Cell::default(),
+            Cell::default(),
+            Cell::default(),
+            Cell::default(),
+            Cell::default(),
+            Cell::default(),
+        ]];
+        let cmds = generate(&cells, Some((0, 5)), Some("한"));
+        // Last command should be the preedit overlay
+        let preedit_cmd = cmds.last().unwrap();
+        assert_eq!(preedit_cmd.row, 0);
+        assert_eq!(preedit_cmd.col, 5);
+        assert_eq!(preedit_cmd.character, '한');
+        assert!(preedit_cmd.flags.contains(CellFlags::UNDERLINE));
+        assert!(preedit_cmd.flags.contains(CellFlags::WIDE_CHAR));
+        // Colors inverted (fg=bg, bg=fg)
+        assert_eq!(preedit_cmd.fg, DEFAULT_BG);
+        assert_eq!(preedit_cmd.bg, DEFAULT_FG);
+    }
+
+    #[test]
+    fn preedit_ascii_single_width() {
+        let cells = vec![vec![Cell::default(), Cell::default()]];
+        let cmds = generate(&cells, Some((0, 0)), Some("a"));
+        let preedit_cmd = cmds.last().unwrap();
+        assert_eq!(preedit_cmd.col, 0);
+        assert_eq!(preedit_cmd.character, 'a');
+        assert!(preedit_cmd.flags.contains(CellFlags::UNDERLINE));
+        assert!(!preedit_cmd.flags.contains(CellFlags::WIDE_CHAR));
+    }
+
+    #[test]
+    fn preedit_multi_char() {
+        let cells = vec![vec![
+            Cell::default(),
+            Cell::default(),
+            Cell::default(),
+            Cell::default(),
+            Cell::default(),
+        ]];
+        let cmds = generate(&cells, Some((0, 0)), Some("ha"));
+        let base_count = 5; // 5 grid cells
+        // 'h' at col 0, 'a' at col 1
+        assert_eq!(cmds[base_count].col, 0);
+        assert_eq!(cmds[base_count].character, 'h');
+        assert_eq!(cmds[base_count + 1].col, 1);
+        assert_eq!(cmds[base_count + 1].character, 'a');
+    }
+
+    #[test]
+    fn preedit_without_cursor_is_ignored() {
+        let cells = vec![vec![Cell::default()]];
+        let cmds_no_cursor = generate(&cells, None, Some("한"));
+        let cmds_no_preedit = generate(&cells, None, None);
+        assert_eq!(cmds_no_cursor.len(), cmds_no_preedit.len());
     }
 }
