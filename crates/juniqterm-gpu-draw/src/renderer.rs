@@ -1,0 +1,540 @@
+use juniqterm_types::{CellFlags, RenderCommand, Rgb};
+use wgpu::util::DeviceExt;
+
+use crate::atlas::GlyphAtlas;
+
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct BgVertex {
+    position: [f32; 2],
+    color: [f32; 3],
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct GlyphVertex {
+    position: [f32; 2],
+    tex_coords: [f32; 2],
+    color: [f32; 3],
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct Uniforms {
+    screen_size: [f32; 2],
+    _padding: [f32; 2],
+}
+
+pub struct GpuDrawer {
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    surface: wgpu::Surface<'static>,
+    surface_config: wgpu::SurfaceConfiguration,
+    bg_pipeline: wgpu::RenderPipeline,
+    glyph_pipeline: wgpu::RenderPipeline,
+    uniform_buffer: wgpu::Buffer,
+    uniform_bind_group: wgpu::BindGroup,
+    glyph_texture: wgpu::Texture,
+    glyph_texture_bind_group: wgpu::BindGroup,
+    glyph_texture_size: u32,
+    atlas: GlyphAtlas,
+    atlas_cursor_x: u32,
+    atlas_cursor_y: u32,
+    atlas_row_height: u32,
+    glyph_regions: std::collections::HashMap<char, GlyphRegion>,
+}
+
+#[derive(Clone, Copy)]
+struct GlyphRegion {
+    u0: f32,
+    v0: f32,
+    u1: f32,
+    v1: f32,
+    width: u32,
+    height: u32,
+    offset_x: f32,
+    offset_y: f32,
+}
+
+const GLYPH_TEXTURE_SIZE: u32 = 1024;
+
+impl GpuDrawer {
+    pub fn new(window: std::sync::Arc<winit::window::Window>, font_size: f32) -> Self {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::all(),
+            ..Default::default()
+        });
+
+        let surface = instance.create_surface(window.clone()).unwrap();
+
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::default(),
+            compatible_surface: Some(&surface),
+            force_fallback_adapter: false,
+        }))
+        .unwrap();
+
+        let (device, queue) = pollster::block_on(adapter.request_device(
+            &wgpu::DeviceDescriptor {
+                label: Some("juniqterm device"),
+                required_features: wgpu::Features::empty(),
+                required_limits: wgpu::Limits::default(),
+                ..Default::default()
+            },
+            None,
+        ))
+        .unwrap();
+
+        let size = window.inner_size();
+        let surface_caps = surface.get_capabilities(&adapter);
+        let format = surface_caps
+            .formats
+            .iter()
+            .find(|f| f.is_srgb())
+            .copied()
+            .unwrap_or(surface_caps.formats[0]);
+
+        let surface_config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format,
+            width: size.width.max(1),
+            height: size.height.max(1),
+            present_mode: wgpu::PresentMode::Fifo,
+            alpha_mode: surface_caps.alpha_modes[0],
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2,
+        };
+        surface.configure(&device, &surface_config);
+
+        // Uniform buffer
+        let uniforms = Uniforms {
+            screen_size: [size.width as f32, size.height as f32],
+            _padding: [0.0; 2],
+        };
+        let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("uniforms"),
+            contents: bytemuck::bytes_of(&uniforms),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let uniform_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("uniform_bgl"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("uniform_bg"),
+            layout: &uniform_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
+        });
+
+        // Glyph texture + bind group
+        let glyph_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("glyph_atlas"),
+            size: wgpu::Extent3d {
+                width: GLYPH_TEXTURE_SIZE,
+                height: GLYPH_TEXTURE_SIZE,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        let glyph_texture_view = glyph_texture.create_view(&Default::default());
+        let glyph_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+
+        let glyph_texture_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("glyph_bgl"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+
+        let glyph_texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("glyph_bg"),
+            layout: &glyph_texture_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&glyph_texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&glyph_sampler),
+                },
+            ],
+        });
+
+        // Background pipeline
+        let bg_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("bg_shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/bg.wgsl").into()),
+        });
+
+        let bg_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("bg_pipeline_layout"),
+            bind_group_layouts: &[&uniform_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        let bg_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("bg_pipeline"),
+            layout: Some(&bg_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &bg_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<BgVertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x3],
+                }],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &bg_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
+        // Glyph pipeline
+        let glyph_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("glyph_shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/glyph.wgsl").into()),
+        });
+
+        let glyph_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("glyph_pipeline_layout"),
+                bind_group_layouts: &[&uniform_bind_group_layout, &glyph_texture_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
+        let glyph_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("glyph_pipeline"),
+            layout: Some(&glyph_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &glyph_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<GlyphVertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x3],
+                }],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &glyph_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::SrcAlpha,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent::OVER,
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
+        let atlas = GlyphAtlas::new(font_size);
+
+        Self {
+            device,
+            queue,
+            surface,
+            surface_config,
+            bg_pipeline,
+            glyph_pipeline,
+            uniform_buffer,
+            uniform_bind_group,
+            glyph_texture,
+            glyph_texture_bind_group,
+            glyph_texture_size: GLYPH_TEXTURE_SIZE,
+            atlas,
+            atlas_cursor_x: 0,
+            atlas_cursor_y: 0,
+            atlas_row_height: 0,
+            glyph_regions: std::collections::HashMap::new(),
+        }
+    }
+
+    pub fn resize(&mut self, width: u32, height: u32) {
+        if width == 0 || height == 0 {
+            return;
+        }
+        self.surface_config.width = width;
+        self.surface_config.height = height;
+        self.surface.configure(&self.device, &self.surface_config);
+
+        let uniforms = Uniforms {
+            screen_size: [width as f32, height as f32],
+            _padding: [0.0; 2],
+        };
+        self.queue
+            .write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
+    }
+
+    pub fn cell_size(&self) -> (f32, f32) {
+        self.atlas.cell_size()
+    }
+
+    pub fn draw(&mut self, commands: &[RenderCommand]) {
+        let output = match self.surface.get_current_texture() {
+            Ok(t) => t,
+            Err(_) => return,
+        };
+        let view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        let (cell_w, cell_h) = self.atlas.cell_size();
+
+        // Build bg vertices
+        let mut bg_vertices: Vec<BgVertex> = Vec::new();
+        for cmd in commands {
+            let x = cmd.col as f32 * cell_w;
+            let y = cmd.row as f32 * cell_h;
+            let w = if cmd.flags.contains(CellFlags::WIDE_CHAR) { cell_w * 2.0 } else { cell_w };
+            let color = rgb_to_f32(cmd.bg);
+
+            // Two triangles for the cell background
+            bg_vertices.push(BgVertex { position: [x, y], color });
+            bg_vertices.push(BgVertex { position: [x + w, y], color });
+            bg_vertices.push(BgVertex { position: [x, y + cell_h], color });
+            bg_vertices.push(BgVertex { position: [x + w, y], color });
+            bg_vertices.push(BgVertex { position: [x + w, y + cell_h], color });
+            bg_vertices.push(BgVertex { position: [x, y + cell_h], color });
+        }
+
+        // Build glyph vertices
+        let mut glyph_vertices: Vec<GlyphVertex> = Vec::new();
+        for cmd in commands {
+            if cmd.character == ' ' {
+                continue;
+            }
+            if cmd.flags.contains(CellFlags::HIDDEN) {
+                continue;
+            }
+
+            let region = self.ensure_glyph_in_atlas(cmd.character);
+            if region.width == 0 || region.height == 0 {
+                continue;
+            }
+
+            let cell_x = cmd.col as f32 * cell_w;
+            let cell_y = cmd.row as f32 * cell_h;
+
+            // Position glyph within cell
+            let baseline_y = cell_y + cell_h * 0.8; // approximate baseline
+            let gx = cell_x + region.offset_x;
+            let gy = baseline_y - region.offset_y - region.height as f32;
+            let gw = region.width as f32;
+            let gh = region.height as f32;
+
+            let color = rgb_to_f32(cmd.fg);
+
+            glyph_vertices.push(GlyphVertex { position: [gx, gy], tex_coords: [region.u0, region.v0], color });
+            glyph_vertices.push(GlyphVertex { position: [gx + gw, gy], tex_coords: [region.u1, region.v0], color });
+            glyph_vertices.push(GlyphVertex { position: [gx, gy + gh], tex_coords: [region.u0, region.v1], color });
+            glyph_vertices.push(GlyphVertex { position: [gx + gw, gy], tex_coords: [region.u1, region.v0], color });
+            glyph_vertices.push(GlyphVertex { position: [gx + gw, gy + gh], tex_coords: [region.u1, region.v1], color });
+            glyph_vertices.push(GlyphVertex { position: [gx, gy + gh], tex_coords: [region.u0, region.v1], color });
+        }
+
+        let bg_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("bg_vb"),
+                contents: bytemuck::cast_slice(&bg_vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+
+        let glyph_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("glyph_vb"),
+                contents: bytemuck::cast_slice(&glyph_vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("render_encoder"),
+            });
+
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("render_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.0,
+                            g: 0.0,
+                            b: 0.0,
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                ..Default::default()
+            });
+
+            // Pass 1: backgrounds
+            if !bg_vertices.is_empty() {
+                pass.set_pipeline(&self.bg_pipeline);
+                pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+                pass.set_vertex_buffer(0, bg_buffer.slice(..));
+                pass.draw(0..bg_vertices.len() as u32, 0..1);
+            }
+
+            // Pass 2: glyphs
+            if !glyph_vertices.is_empty() {
+                pass.set_pipeline(&self.glyph_pipeline);
+                pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+                pass.set_bind_group(1, &self.glyph_texture_bind_group, &[]);
+                pass.set_vertex_buffer(0, glyph_buffer.slice(..));
+                pass.draw(0..glyph_vertices.len() as u32, 0..1);
+            }
+        }
+
+        self.queue.submit(std::iter::once(encoder.finish()));
+        output.present();
+    }
+
+    fn ensure_glyph_in_atlas(&mut self, c: char) -> GlyphRegion {
+        if let Some(&region) = self.glyph_regions.get(&c) {
+            return region;
+        }
+
+        let glyph = self.atlas.get_or_insert(c);
+        let w = glyph.width;
+        let h = glyph.height;
+
+        if w == 0 || h == 0 {
+            let region = GlyphRegion {
+                u0: 0.0, v0: 0.0, u1: 0.0, v1: 0.0,
+                width: 0, height: 0,
+                offset_x: 0.0, offset_y: 0.0,
+            };
+            self.glyph_regions.insert(c, region);
+            return region;
+        }
+
+        // Advance cursor, wrap to next row if needed
+        if self.atlas_cursor_x + w > self.glyph_texture_size {
+            self.atlas_cursor_x = 0;
+            self.atlas_cursor_y += self.atlas_row_height;
+            self.atlas_row_height = 0;
+        }
+
+        let x = self.atlas_cursor_x;
+        let y = self.atlas_cursor_y;
+        self.atlas_cursor_x += w;
+        self.atlas_row_height = self.atlas_row_height.max(h);
+
+        // Upload to GPU texture
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.glyph_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d { x, y, z: 0 },
+                aspect: wgpu::TextureAspect::All,
+            },
+            &glyph.bitmap,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(w),
+                rows_per_image: None,
+            },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        let ts = self.glyph_texture_size as f32;
+        let region = GlyphRegion {
+            u0: x as f32 / ts,
+            v0: y as f32 / ts,
+            u1: (x + w) as f32 / ts,
+            v1: (y + h) as f32 / ts,
+            width: w,
+            height: h,
+            offset_x: glyph.offset_x,
+            offset_y: glyph.offset_y,
+        };
+        self.glyph_regions.insert(c, region);
+        region
+    }
+}
+
+fn rgb_to_f32(rgb: Rgb) -> [f32; 3] {
+    [
+        rgb.r as f32 / 255.0,
+        rgb.g as f32 / 255.0,
+        rgb.b as f32 / 255.0,
+    ]
+}
