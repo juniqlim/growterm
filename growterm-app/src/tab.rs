@@ -11,7 +11,6 @@ pub struct Tab {
     pub terminal: Arc<Mutex<TerminalState>>,
     pub pty_writer: PtyWriter,
     pub dirty: Arc<AtomicBool>,
-    pub title: String,
 }
 
 pub struct TerminalState {
@@ -135,7 +134,9 @@ impl TabManager {
 
     pub fn tab_bar_info(&self) -> TabBarInfo {
         TabBarInfo {
-            titles: self.tabs.iter().map(|t| t.title.clone()).collect(),
+            titles: (1..=self.tabs.len())
+                .map(|i| if i <= 9 { format!("⌘{}", i) } else { format!("{}", i) })
+                .collect(),
             active_index: self.active,
         }
     }
@@ -145,7 +146,6 @@ impl Tab {
     pub fn spawn(
         rows: u16,
         cols: u16,
-        index: usize,
         window: Arc<MacWindow>,
     ) -> Result<Self, std::io::Error> {
         let grid = Grid::new(cols, rows);
@@ -165,7 +165,6 @@ impl Tab {
             terminal,
             pty_writer,
             dirty,
-            title: format!("Tab {}", index + 1),
         })
     }
 }
@@ -216,7 +215,7 @@ mod tests {
         assert!(mgr.active_tab().is_none());
     }
 
-    fn dummy_tab(title: &str) -> Tab {
+    fn dummy_tab() -> Tab {
         let grid = Grid::new(80, 24);
         let vt_parser = VtParser::new();
         let terminal = Arc::new(Mutex::new(TerminalState { grid, vt_parser }));
@@ -229,18 +228,17 @@ mod tests {
             terminal,
             pty_writer,
             dirty,
-            title: title.to_string(),
         }
     }
 
     #[test]
     fn add_tab_activates_new_tab() {
         let mut mgr = TabManager::new();
-        mgr.add_tab(dummy_tab("Tab 1"));
+        mgr.add_tab(dummy_tab());
         assert_eq!(mgr.tab_count(), 1);
         assert_eq!(mgr.active_index(), 0);
 
-        mgr.add_tab(dummy_tab("Tab 2"));
+        mgr.add_tab(dummy_tab());
         assert_eq!(mgr.tab_count(), 2);
         assert_eq!(mgr.active_index(), 1);
     }
@@ -248,9 +246,9 @@ mod tests {
     #[test]
     fn switch_to_valid_index() {
         let mut mgr = TabManager::new();
-        mgr.add_tab(dummy_tab("Tab 1"));
-        mgr.add_tab(dummy_tab("Tab 2"));
-        mgr.add_tab(dummy_tab("Tab 3"));
+        mgr.add_tab(dummy_tab());
+        mgr.add_tab(dummy_tab());
+        mgr.add_tab(dummy_tab());
 
         mgr.switch_to(0);
         assert_eq!(mgr.active_index(), 0);
@@ -262,7 +260,7 @@ mod tests {
     #[test]
     fn switch_to_invalid_index_no_change() {
         let mut mgr = TabManager::new();
-        mgr.add_tab(dummy_tab("Tab 1"));
+        mgr.add_tab(dummy_tab());
         mgr.switch_to(5);
         assert_eq!(mgr.active_index(), 0);
     }
@@ -270,9 +268,9 @@ mod tests {
     #[test]
     fn next_prev_tab_wraps() {
         let mut mgr = TabManager::new();
-        mgr.add_tab(dummy_tab("Tab 1"));
-        mgr.add_tab(dummy_tab("Tab 2"));
-        mgr.add_tab(dummy_tab("Tab 3"));
+        mgr.add_tab(dummy_tab());
+        mgr.add_tab(dummy_tab());
+        mgr.add_tab(dummy_tab());
 
         mgr.switch_to(0);
 
@@ -292,9 +290,9 @@ mod tests {
     #[test]
     fn close_tab_adjusts_active() {
         let mut mgr = TabManager::new();
-        mgr.add_tab(dummy_tab("Tab 1"));
-        mgr.add_tab(dummy_tab("Tab 2"));
-        mgr.add_tab(dummy_tab("Tab 3"));
+        mgr.add_tab(dummy_tab());
+        mgr.add_tab(dummy_tab());
+        mgr.add_tab(dummy_tab());
 
         // Active is 2 (last added). Close tab 1.
         let removed = mgr.close_tab(1);
@@ -307,8 +305,8 @@ mod tests {
     #[test]
     fn close_active_tab() {
         let mut mgr = TabManager::new();
-        mgr.add_tab(dummy_tab("Tab 1"));
-        mgr.add_tab(dummy_tab("Tab 2"));
+        mgr.add_tab(dummy_tab());
+        mgr.add_tab(dummy_tab());
         mgr.switch_to(0);
 
         let removed = mgr.close_active();
@@ -320,7 +318,7 @@ mod tests {
     #[test]
     fn close_last_remaining_tab() {
         let mut mgr = TabManager::new();
-        mgr.add_tab(dummy_tab("Tab 1"));
+        mgr.add_tab(dummy_tab());
         let removed = mgr.close_active();
         assert!(removed.is_some());
         assert!(mgr.is_empty());
@@ -329,11 +327,11 @@ mod tests {
     #[test]
     fn tab_bar_info_reflects_state() {
         let mut mgr = TabManager::new();
-        mgr.add_tab(dummy_tab("Shell"));
-        mgr.add_tab(dummy_tab("Vim"));
+        mgr.add_tab(dummy_tab());
+        mgr.add_tab(dummy_tab());
 
         let info = mgr.tab_bar_info();
-        assert_eq!(info.titles, vec!["Shell", "Vim"]);
+        assert_eq!(info.titles, vec!["⌘1", "⌘2"]);
         assert_eq!(info.active_index, 1);
     }
 }

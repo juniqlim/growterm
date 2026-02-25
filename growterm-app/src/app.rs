@@ -17,13 +17,11 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
     let (cols, rows) = zoom::calc_grid_size(width, height, cell_w, cell_h);
 
     let mut tabs = TabManager::new();
-    let mut tab_counter: usize = 0;
 
     // Spawn initial tab (no tab bar for single tab)
-    match Tab::spawn(rows, cols, tab_counter, window.clone()) {
+    match Tab::spawn(rows, cols, window.clone()) {
         Ok(tab) => {
             tabs.add_tab(tab);
-            tab_counter += 1;
         }
         Err(e) => {
             eprintln!("Failed to spawn PTY: {e}");
@@ -71,10 +69,9 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                         let (cols, rows) = zoom::calc_grid_size(w, h, cw, ch);
                         let had_no_tab_bar = !tabs.show_tab_bar();
                         let term_rows = rows.saturating_sub(1).max(1);
-                        match Tab::spawn(term_rows, cols, tab_counter, window.clone()) {
+                        match Tab::spawn(term_rows, cols, window.clone()) {
                             Ok(tab) => {
                                 tabs.add_tab(tab);
-                                tab_counter += 1;
                                 sel.clear();
                                 preedit.clear();
                                 // Tab bar just appeared — shrink existing tabs by 1 row
