@@ -15,11 +15,13 @@ A terminal app that grows — GPU-accelerated terminal emulator written in Rust 
 ## Features
 
 - **GPU Rendering** — wgpu-based 2-pass rendering (background + glyphs)
-- **Korean Support** — IME input, wide character handling, D2Coding font
-- **VT Parsing** — SGR attributes, 256/RGB color, cursor movement, screen clearing
-- **Mouse Selection & Clipboard** — Drag selection, Cmd+C/V
-- **Font Zoom** — Cmd+=/- to adjust size
-- **Block/Box Drawing Characters** — Geometric rendering
+- **Korean Support** — IME input with preedit overlay, wide character handling, D2Coding font
+- **VT Parsing** — SGR attributes (bold, dim, italic, underline, strikethrough, inverse), 256/RGB color, cursor movement, screen clearing
+- **Scrollback** — 10,000 line history, Cmd+PageUp/PageDown, visual scrollbar
+- **Mouse Selection & Clipboard** — Drag selection with wide character awareness, Cmd+C/V
+- **Font Zoom** — Cmd+=/- to adjust size (8pt–72pt)
+- **Box Drawing** — Light, heavy, double, and rounded corner characters with geometric rendering
+- **Keyboard** — xterm-style encoding, Shift/Ctrl/Alt modifier combinations
 
 ## Architecture
 
