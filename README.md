@@ -10,7 +10,7 @@ A terminal app that grows — GPU-accelerated terminal emulator written in Rust 
 
 - **Modular**: Each module has a single responsibility. You don't need to know the VT parser to fix clipboard copy.
 - **Testable**: Pure functions and state machines are verified with unit tests; module interactions with integration tests.
-- **Evolvable**: Adding a new feature means adding a new module, not rewriting existing ones.
+- **Evolvable**: Reversible structure makes it safe to change, grow, and evolve.
 
 ## Features
 
