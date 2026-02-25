@@ -83,7 +83,7 @@ impl ApplicationHandler for App {
             }
             WindowEvent::RedrawRequested => {
                 if let Some(drawer) = &mut self.drawer {
-                    let commands = generate(&self.grid, None, None);
+                    let commands = generate(&self.grid, None, None, None);
                     drawer.draw(&commands);
                 }
             }

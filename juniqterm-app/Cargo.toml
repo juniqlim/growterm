@@ -13,3 +13,4 @@ juniqterm-pty = { path = "../juniqterm-pty" }
 juniqterm-input = { path = "../juniqterm-input" }
 winit = "0.30"
 libc = "0.2"
+arboard = "3"

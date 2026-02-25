@@ -1,6 +1,7 @@
 mod app;
 mod event_action;
 mod key_convert;
+mod selection;
 mod zoom;
 
 use app::App;

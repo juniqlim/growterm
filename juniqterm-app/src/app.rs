@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use winit::application::ApplicationHandler;
-use winit::event::{Ime, WindowEvent};
+use winit::event::{ElementState, Ime, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
 use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowId};
@@ -15,6 +15,7 @@ use juniqterm_vt_parser::VtParser;
 
 use crate::event_action::{self, Action, ImeHandler};
 use crate::key_convert::convert_key;
+use crate::selection::{self, Selection};
 use crate::zoom;
 
 const FONT_SIZE: f32 = 32.0;
@@ -34,6 +35,10 @@ pub struct App {
     modifiers: ModifiersState,
     font_size: f32,
     ime: ImeHandler,
+    selection: Selection,
+    cell_size: (f32, f32),
+    cursor_pos_px: (f64, f64),
+    mouse_pressed: bool,
 }
 
 impl App {
@@ -48,6 +53,10 @@ impl App {
             modifiers: ModifiersState::empty(),
             font_size: FONT_SIZE,
             ime: ImeHandler::new(),
+            selection: Selection::default(),
+            cell_size: (0.0, 0.0),
+            cursor_pos_px: (0.0, 0.0),
+            mouse_pressed: false,
         }
     }
 
@@ -103,8 +112,14 @@ impl App {
             } else {
                 Some(self.ime.preedit())
             };
+            let sel = if !self.selection.is_empty() {
+                let n = self.selection.normalized();
+                Some((n.0, n.1))
+            } else {
+                None
+            };
             let commands =
-                juniqterm_render_cmd::generate(state.grid.cells(), Some(cursor), preedit);
+                juniqterm_render_cmd::generate(state.grid.cells(), Some(cursor), preedit, sel);
             drop(state);
             drawer.draw(&commands);
         }
@@ -124,6 +139,7 @@ impl ApplicationHandler<()> for App {
 
         let mut drawer = GpuDrawer::new(window.clone(), FONT_SIZE);
         let (cell_w, cell_h) = drawer.cell_size();
+        self.cell_size = (cell_w, cell_h);
         let size = window.inner_size();
         drawer.resize(size.width, size.height);
 
@@ -223,6 +239,7 @@ impl ApplicationHandler<()> for App {
                         {
                             drawer.set_font_size(self.font_size);
                             let (cell_w, cell_h) = drawer.cell_size();
+                            self.cell_size = (cell_w, cell_h);
                             let size = window.inner_size();
                             let (cols, rows) = zoom::calc_grid_size(
                                 size.width, size.height, cell_w, cell_h,
@@ -296,6 +313,57 @@ impl ApplicationHandler<()> for App {
             WindowEvent::RedrawRequested => {
                 self.dirty.swap(false, Ordering::Relaxed);
                 self.render();
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                self.cursor_pos_px = (position.x, position.y);
+                if self.mouse_pressed {
+                    let (row, col) = selection::pixel_to_cell(
+                        position.x as f32,
+                        position.y as f32,
+                        self.cell_size.0,
+                        self.cell_size.1,
+                    );
+                    self.selection.update(row, col);
+                    if let Some(window) = &self.window {
+                        window.request_redraw();
+                    }
+                }
+            }
+            WindowEvent::MouseInput { state, button: MouseButton::Left, .. } => {
+                match state {
+                    ElementState::Pressed => {
+                        self.mouse_pressed = true;
+                        let (row, col) = selection::pixel_to_cell(
+                            self.cursor_pos_px.0 as f32,
+                            self.cursor_pos_px.1 as f32,
+                            self.cell_size.0,
+                            self.cell_size.1,
+                        );
+                        self.selection.begin(row, col);
+                    }
+                    ElementState::Released => {
+                        self.mouse_pressed = false;
+                        self.selection.finish();
+                        if !self.selection.is_empty() {
+                            if let Some(terminal) = &self.terminal {
+                                let state = terminal.lock().unwrap();
+                                let text = selection::extract_text(
+                                    state.grid.cells(),
+                                    &self.selection,
+                                );
+                                drop(state);
+                                if !text.is_empty() {
+                                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                        let _ = clipboard.set_text(text);
+                                    }
+                                }
+                            }
+                        }
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                    }
+                }
             }
             _ => {}
         }
