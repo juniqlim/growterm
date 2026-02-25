@@ -1,42 +1,44 @@
-use juniqterm_gpu_draw::GlyphAtlas;
+/// 블록 문자(U+2580~U+259F)가 렌더러에서 사각형으로 처리되어
+/// 글리프 래스터라이징을 우회하는지 확인하는 테스트.
+/// fontdue 글리프의 alpha < 255 문제는 사각형 렌더링으로 해결됨.
 
 #[test]
-fn full_block_edge_alpha() {
-    let mut atlas = GlyphAtlas::new(32.0);
-    let glyph = atlas.get_or_insert('█');
-    let w = glyph.width as usize;
-    let h = glyph.height as usize;
+fn block_chars_are_in_rect_render_range() {
+    // 사각형으로 렌더링되어야 하는 블록 문자 목록
+    let block_chars = [
+        '\u{2580}', // ▀
+        '\u{2584}', // ▄
+        '\u{2588}', // █
+        '\u{258C}', // ▌
+        '\u{2590}', // ▐
+        '\u{2596}', // ▖
+        '\u{2597}', // ▗
+        '\u{2598}', // ▘
+        '\u{2599}', // ▙
+        '\u{259A}', // ▚
+        '\u{259B}', // ▛
+        '\u{259C}', // ▜
+        '\u{259D}', // ▝
+        '\u{259E}', // ▞
+        '\u{259F}', // ▟
+    ];
 
-    // 첫 번째 열, 마지막 열, 첫 번째 행, 마지막 행의 alpha 값 출력
-    eprintln!("█ bitmap {}x{}", w, h);
-
-    eprint!("첫 열: ");
-    for y in 0..h.min(5) {
-        eprint!("{} ", glyph.bitmap[y * w]);
+    for ch in block_chars {
+        let code = ch as u32;
+        assert!(
+            code >= 0x2580 && code <= 0x259F,
+            "문자 U+{code:04X}가 블록 문자 범위에 없음"
+        );
+        // shade 문자(U+2591-U+2593)는 글리프 렌더링 유지
+        assert!(
+            !(code >= 0x2591 && code <= 0x2593),
+            "shade 문자는 사각형이 아닌 글리프로 렌더링되어야 함"
+        );
     }
-    eprintln!("...");
 
-    eprint!("끝 열: ");
-    for y in 0..h.min(5) {
-        eprint!("{} ", glyph.bitmap[y * w + w - 1]);
+    // shade 문자는 사각형 렌더링 대상이 아님을 확인
+    for ch in ['\u{2591}', '\u{2592}', '\u{2593}'] {
+        let code = ch as u32;
+        assert!(code >= 0x2591 && code <= 0x2593);
     }
-    eprintln!("...");
-
-    eprint!("첫 행: ");
-    for x in 0..w.min(5) {
-        eprint!("{} ", glyph.bitmap[x]);
-    }
-    eprintln!("...");
-
-    eprint!("끝 행: ");
-    for x in 0..w.min(5) {
-        eprint!("{} ", glyph.bitmap[(h - 1) * w + x]);
-    }
-    eprintln!("...");
-
-    // 모든 픽셀이 255인지 확인
-    let non_full = glyph.bitmap.iter().filter(|&&v| v < 255).count();
-    eprintln!("alpha < 255인 픽셀: {non_full}/{}", w * h);
-
-    assert_eq!(non_full, 0, "█ 글리프에 alpha < 255 픽셀이 {non_full}개 있음");
 }

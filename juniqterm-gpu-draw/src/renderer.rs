@@ -383,12 +383,120 @@ impl GpuDrawer {
 
         // Build glyph vertices
         let mut glyph_vertices: Vec<GlyphVertex> = Vec::new();
+
+        // Helper: push a fg-colored rectangle into bg_vertices
+        let mut push_rect = |bg_verts: &mut Vec<BgVertex>, x: f32, y: f32, w: f32, h: f32, color: [f32; 3]| {
+            bg_verts.push(BgVertex { position: [x, y], color });
+            bg_verts.push(BgVertex { position: [x + w, y], color });
+            bg_verts.push(BgVertex { position: [x, y + h], color });
+            bg_verts.push(BgVertex { position: [x + w, y], color });
+            bg_verts.push(BgVertex { position: [x + w, y + h], color });
+            bg_verts.push(BgVertex { position: [x, y + h], color });
+        };
+
         for cmd in commands {
             if cmd.character == ' ' {
                 continue;
             }
             if cmd.flags.contains(CellFlags::HIDDEN) {
                 continue;
+            }
+
+            // Block elements (U+2580..U+259F, excluding shades U+2591-U+2593)
+            let ch = cmd.character;
+            if ch >= '\u{2580}' && ch <= '\u{259F}' && !(ch >= '\u{2591}' && ch <= '\u{2593}') {
+                let cx = cmd.col as f32 * cell_w;
+                let cy = cmd.row as f32 * cell_h;
+                let fg = rgb_to_f32(cmd.fg);
+                let hw = cell_w / 2.0;
+                let hh = cell_h / 2.0;
+
+                match ch {
+                    '\u{2588}' => push_rect(&mut bg_vertices, cx, cy, cell_w, cell_h, fg),         // █
+                    '\u{2580}' => push_rect(&mut bg_vertices, cx, cy, cell_w, hh, fg),              // ▀
+                    '\u{2584}' => push_rect(&mut bg_vertices, cx, cy + hh, cell_w, hh, fg),         // ▄
+                    '\u{258C}' => push_rect(&mut bg_vertices, cx, cy, hw, cell_h, fg),              // ▌
+                    '\u{2590}' => push_rect(&mut bg_vertices, cx + hw, cy, hw, cell_h, fg),         // ▐
+                    '\u{259B}' => { // ▛ upper half + lower-left
+                        push_rect(&mut bg_vertices, cx, cy, cell_w, hh, fg);
+                        push_rect(&mut bg_vertices, cx, cy + hh, hw, hh, fg);
+                    }
+                    '\u{259C}' => { // ▜ upper half + lower-right
+                        push_rect(&mut bg_vertices, cx, cy, cell_w, hh, fg);
+                        push_rect(&mut bg_vertices, cx + hw, cy + hh, hw, hh, fg);
+                    }
+                    '\u{2599}' => { // ▙ lower half + upper-left
+                        push_rect(&mut bg_vertices, cx, cy, hw, hh, fg);
+                        push_rect(&mut bg_vertices, cx, cy + hh, cell_w, hh, fg);
+                    }
+                    '\u{259F}' => { // ▟ lower half + upper-right
+                        push_rect(&mut bg_vertices, cx + hw, cy, hw, hh, fg);
+                        push_rect(&mut bg_vertices, cx, cy + hh, cell_w, hh, fg);
+                    }
+                    '\u{2598}' => push_rect(&mut bg_vertices, cx, cy, hw, hh, fg),                 // ▘
+                    '\u{259D}' => push_rect(&mut bg_vertices, cx + hw, cy, hw, hh, fg),             // ▝
+                    '\u{2596}' => push_rect(&mut bg_vertices, cx, cy + hh, hw, hh, fg),             // ▖
+                    '\u{2597}' => push_rect(&mut bg_vertices, cx + hw, cy + hh, hw, hh, fg),        // ▗
+                    '\u{259A}' => { // ▚ upper-left + lower-right
+                        push_rect(&mut bg_vertices, cx, cy, hw, hh, fg);
+                        push_rect(&mut bg_vertices, cx + hw, cy + hh, hw, hh, fg);
+                    }
+                    '\u{259E}' => { // ▞ upper-right + lower-left
+                        push_rect(&mut bg_vertices, cx + hw, cy, hw, hh, fg);
+                        push_rect(&mut bg_vertices, cx, cy + hh, hw, hh, fg);
+                    }
+                    _ => {} // other chars in range (U+2585-U+2587, U+2589-U+258B, U+258D-U+258F, U+2594-U+2595)
+                }
+                continue;
+            }
+
+            // Box drawing characters (U+2500..U+257F)
+            if ch >= '\u{2500}' && ch <= '\u{257F}' {
+                if let Some(segs) = box_drawing_segments(ch) {
+                    let cx = cmd.col as f32 * cell_w;
+                    let cy = cmd.row as f32 * cell_h;
+                    let fg = rgb_to_f32(cmd.fg);
+                    let light_h = 1.0_f32;
+                    let heavy_h = (cell_h / 8.0).ceil().max(2.0);
+                    let light_w = 1.0_f32;
+                    let heavy_w = (cell_w / 8.0).ceil().max(2.0);
+                    let mid_x = (cell_w / 2.0).floor();
+                    let mid_y = (cell_h / 2.0).floor();
+
+                    // Horizontal segment
+                    if segs.h_weight != LineWeight::None && segs.h_weight != LineWeight::Double {
+                        let th = if segs.h_weight == LineWeight::Heavy { heavy_h } else { light_h };
+                        let x0 = if segs.left { 0.0 } else { mid_x - (th / 2.0).floor() };
+                        let x1 = if segs.right { cell_w } else { mid_x + (th / 2.0).ceil() };
+                        push_rect(&mut bg_vertices, cx + x0, cy + mid_y - (th / 2.0).floor(), x1 - x0, th, fg);
+                    }
+                    // Vertical segment
+                    if segs.v_weight != LineWeight::None && segs.v_weight != LineWeight::Double {
+                        let tw = if segs.v_weight == LineWeight::Heavy { heavy_w } else { light_w };
+                        let y0 = if segs.up { 0.0 } else { mid_y - (tw / 2.0).floor() };
+                        let y1 = if segs.down { cell_h } else { mid_y + (tw / 2.0).ceil() };
+                        push_rect(&mut bg_vertices, cx + mid_x - (tw / 2.0).floor(), cy + y0, tw, y1 - y0, fg);
+                    }
+                    // Double horizontal
+                    if segs.h_weight == LineWeight::Double {
+                        let gap = (cell_h / 6.0).ceil();
+                        let th = light_h;
+                        let x0 = if segs.left { 0.0 } else { mid_x };
+                        let x1 = if segs.right { cell_w } else { mid_x + light_w };
+                        push_rect(&mut bg_vertices, cx + x0, cy + mid_y - gap - th / 2.0, x1 - x0, th, fg);
+                        push_rect(&mut bg_vertices, cx + x0, cy + mid_y + gap - th / 2.0, x1 - x0, th, fg);
+                    }
+                    // Double vertical
+                    if segs.v_weight == LineWeight::Double {
+                        let gap = (cell_w / 6.0).ceil();
+                        let tw = light_w;
+                        let y0 = if segs.up { 0.0 } else { mid_y };
+                        let y1 = if segs.down { cell_h } else { mid_y + light_h };
+                        push_rect(&mut bg_vertices, cx + mid_x - gap - tw / 2.0, cy + y0, tw, y1 - y0, fg);
+                        push_rect(&mut bg_vertices, cx + mid_x + gap - tw / 2.0, cy + y0, tw, y1 - y0, fg);
+                    }
+                    continue;
+                }
             }
 
             let region = self.ensure_glyph_in_atlas(cmd.character);
@@ -554,4 +662,72 @@ fn rgb_to_f32(rgb: Rgb) -> [f32; 3] {
         rgb.g as f32 / 255.0,
         rgb.b as f32 / 255.0,
     ]
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum LineWeight {
+    None,
+    Light,
+    Heavy,
+    Double,
+}
+
+struct BoxSegments {
+    left: bool,
+    right: bool,
+    up: bool,
+    down: bool,
+    h_weight: LineWeight,
+    v_weight: LineWeight,
+}
+
+fn box_drawing_segments(ch: char) -> Option<BoxSegments> {
+    use LineWeight::*;
+    let s = |left, right, up, down, h: LineWeight, v: LineWeight| {
+        Some(BoxSegments { left, right, up, down, h_weight: h, v_weight: v })
+    };
+    match ch {
+        // Light lines
+        '\u{2500}' => s(true,  true,  false, false, Light, None),   // ─
+        '\u{2502}' => s(false, false, true,  true,  None,  Light),  // │
+        '\u{250C}' => s(false, true,  false, true,  Light, Light),  // ┌
+        '\u{2510}' => s(true,  false, false, true,  Light, Light),  // ┐
+        '\u{2514}' => s(false, true,  true,  false, Light, Light),  // └
+        '\u{2518}' => s(true,  false, true,  false, Light, Light),  // ┘
+        '\u{251C}' => s(false, true,  true,  true,  Light, Light),  // ├
+        '\u{2524}' => s(true,  false, true,  true,  Light, Light),  // ┤
+        '\u{252C}' => s(true,  true,  false, true,  Light, Light),  // ┬
+        '\u{2534}' => s(true,  true,  true,  false, Light, Light),  // ┴
+        '\u{253C}' => s(true,  true,  true,  true,  Light, Light),  // ┼
+        // Heavy lines
+        '\u{2501}' => s(true,  true,  false, false, Heavy, None),   // ━
+        '\u{2503}' => s(false, false, true,  true,  None,  Heavy),  // ┃
+        '\u{250F}' => s(false, true,  false, true,  Heavy, Heavy),  // ┏
+        '\u{2513}' => s(true,  false, false, true,  Heavy, Heavy),  // ┓
+        '\u{2517}' => s(false, true,  true,  false, Heavy, Heavy),  // ┗
+        '\u{251B}' => s(true,  false, true,  false, Heavy, Heavy),  // ┛
+        '\u{2523}' => s(false, true,  true,  true,  Heavy, Heavy),  // ┣
+        '\u{252B}' => s(true,  false, true,  true,  Heavy, Heavy),  // ┫
+        '\u{2533}' => s(true,  true,  false, true,  Heavy, Heavy),  // ┳
+        '\u{253B}' => s(true,  true,  true,  false, Heavy, Heavy),  // ┻
+        '\u{254B}' => s(true,  true,  true,  true,  Heavy, Heavy),  // ╋
+        // Double lines
+        '\u{2550}' => s(true,  true,  false, false, Double, None),    // ═
+        '\u{2551}' => s(false, false, true,  true,  None,   Double),  // ║
+        '\u{2554}' => s(false, true,  false, true,  Double, Double),  // ╔
+        '\u{2557}' => s(true,  false, false, true,  Double, Double),  // ╗
+        '\u{255A}' => s(false, true,  true,  false, Double, Double),  // ╚
+        '\u{255D}' => s(true,  false, true,  false, Double, Double),  // ╝
+        '\u{2560}' => s(false, true,  true,  true,  Double, Double),  // ╠
+        '\u{2563}' => s(true,  false, true,  true,  Double, Double),  // ╣
+        '\u{2566}' => s(true,  true,  false, true,  Double, Double),  // ╦
+        '\u{2569}' => s(true,  true,  true,  false, Double, Double),  // ╩
+        '\u{256C}' => s(true,  true,  true,  true,  Double, Double),  // ╬
+        // Rounded corners (light)
+        '\u{256D}' => s(false, true,  false, true,  Light, Light),  // ╭
+        '\u{256E}' => s(true,  false, false, true,  Light, Light),  // ╮
+        '\u{256F}' => s(true,  false, true,  false, Light, Light),  // ╯
+        '\u{2570}' => s(false, true,  true,  false, Light, Light),  // ╰
+        _ => Option::None,
+    }
 }
