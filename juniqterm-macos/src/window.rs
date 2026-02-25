@@ -1,3 +1,4 @@
+use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::sync::mpsc::Sender;
 
@@ -5,6 +6,18 @@ use objc2::rc::Retained;
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSBackingStoreType, NSWindow, NSWindowStyleMask};
 use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
+
+extern "C" {
+    static _dispatch_main_q: c_void;
+    fn dispatch_async_f(queue: *const c_void, context: *mut c_void, work: extern "C" fn(*mut c_void));
+}
+
+extern "C" fn set_needs_display_on_main(ctx: *mut c_void) {
+    unsafe {
+        let view: *mut objc2::runtime::AnyObject = ctx as *mut _;
+        let _: () = objc2::msg_send![view, setNeedsDisplay: true];
+    }
+}
 use raw_window_handle::{
     AppKitDisplayHandle, AppKitWindowHandle, HasDisplayHandle, HasWindowHandle, RawDisplayHandle,
     RawWindowHandle,
@@ -65,7 +78,10 @@ impl MacWindow {
     }
 
     pub fn request_redraw(&self) {
-        self.view.setNeedsDisplay(true);
+        let ptr = Retained::as_ptr(&self.view) as *mut c_void;
+        unsafe {
+            dispatch_async_f(&_dispatch_main_q as *const _ as *const c_void, ptr, set_needs_display_on_main);
+        }
     }
 
     pub fn show(&self) {
