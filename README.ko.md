@@ -1,8 +1,10 @@
-# growterm
+<p align="center">
+  <img src="assets/banner.svg" alt="growTerm banner" width="100%"/>
+</p>
 
 [English](README.md)
 
-Rust로 만든 GPU 가속 터미널 에뮬레이터. macOS 지원.
+자라나는 터미널 앱 — Rust로 만든 GPU 가속 터미널 에뮬레이터. macOS 지원.
 
 ## 설계 목표
 
@@ -58,7 +60,7 @@ cargo run -p growterm-app
 cargo test
 ```
 
-314개 테스트 (단위 + 통합).
+258개 이상 테스트 (단위 + 통합).
 
 ## 요구사항
 

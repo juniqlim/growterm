@@ -4,7 +4,7 @@
 
 [한국어](README.ko.md)
 
-A GPU-accelerated terminal emulator written in Rust. macOS support.
+A terminal app that grows — GPU-accelerated terminal emulator written in Rust for macOS.
 
 ## Design Goals
 
@@ -60,7 +60,7 @@ cargo run -p growterm-app
 cargo test
 ```
 
-314 tests (unit + integration).
+258+ tests (unit + integration).
 
 ## Requirements
 
