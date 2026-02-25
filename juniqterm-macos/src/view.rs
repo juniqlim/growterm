@@ -23,7 +23,8 @@ enum ImeState {
     Continue,
 }
 
-pub(crate) struct Ivars {
+#[doc(hidden)]
+pub struct Ivars {
     sender: RefCell<Option<Sender<AppEvent>>>,
     ime_state: Cell<ImeState>,
     marked_text: RefCell<String>,
@@ -35,7 +36,7 @@ define_class! {
     #[thread_kind = MainThreadOnly]
     #[name = "JuniqTerminalView"]
     #[ivars = Ivars]
-    pub(crate) struct TerminalView;
+    pub struct TerminalView;
 
     // --- NSView / NSResponder overrides ---
 
@@ -213,7 +214,7 @@ define_class! {
 }
 
 impl TerminalView {
-    pub(crate) fn new(mtm: MainThreadMarker) -> Retained<Self> {
+    pub fn new(mtm: MainThreadMarker) -> Retained<Self> {
         let this = mtm.alloc::<Self>();
         let this = this.set_ivars(Ivars {
             sender: RefCell::new(None),

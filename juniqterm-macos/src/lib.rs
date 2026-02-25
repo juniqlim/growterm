@@ -1,18 +1,36 @@
 mod delegate;
 pub mod event;
 pub mod key_convert;
-mod view;
+#[doc(hidden)]
+pub mod view;
 mod window;
 
 pub use event::{AppEvent, Modifiers};
 pub use key_convert::convert_key;
 pub use window::MacWindow;
 
+/// 통합 테스트용 헬퍼. 프로덕션 코드에서 사용하지 않음.
+#[doc(hidden)]
+pub mod test_support {
+    use objc2::rc::Retained;
+    use objc2::MainThreadMarker;
+    use crate::view::TerminalView;
+
+    pub fn create_terminal_view(mtm: MainThreadMarker) -> Retained<TerminalView> {
+        TerminalView::new(mtm)
+    }
+
+    pub fn setup_menu(app: &objc2_app_kit::NSApplication) {
+        crate::setup_main_menu(app);
+    }
+}
+
 use std::sync::mpsc;
 
 use objc2::runtime::ProtocolObject;
 use objc2::MainThreadMarker;
-use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate};
+use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSMenu, NSMenuItem};
+use objc2_foundation::NSString;
 
 use delegate::AppDelegate;
 
@@ -30,6 +48,7 @@ pub fn run(setup: impl FnOnce(std::sync::Arc<MacWindow>, mpsc::Receiver<AppEvent
 
     let app = NSApplication::sharedApplication(mtm);
     app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
+    setup_main_menu(&app);
     let delegate = AppDelegate::new(mtm, Box::new(setup));
     let delegate_proto: &ProtocolObject<dyn NSApplicationDelegate> =
         ProtocolObject::from_ref(&*delegate);
@@ -38,6 +57,28 @@ pub fn run(setup: impl FnOnce(std::sync::Arc<MacWindow>, mpsc::Receiver<AppEvent
     app.run();
 
     std::process::exit(0);
+}
+
+fn setup_main_menu(app: &NSApplication) {
+    let mtm = MainThreadMarker::new().unwrap();
+    unsafe {
+        let menubar = NSMenu::new(mtm);
+        let app_menu_item = NSMenuItem::new(mtm);
+        menubar.addItem(&app_menu_item);
+        app.setMainMenu(Some(&menubar));
+
+        let app_menu = NSMenu::new(mtm);
+        let quit_title = NSString::from_str("Quit JuniqTerm");
+        let quit_key = NSString::from_str("q");
+        let quit_item = NSMenuItem::initWithTitle_action_keyEquivalent(
+            mtm.alloc(),
+            &quit_title,
+            Some(objc2::sel!(terminate:)),
+            &quit_key,
+        );
+        app_menu.addItem(&quit_item);
+        app_menu_item.setSubmenu(Some(&app_menu));
+    }
 }
 
 /// bare 바이너리(cargo run)에서도 IMK 입력 서버가 연결되도록
@@ -94,6 +135,7 @@ fn ensure_bundle_identifier() {
 
     // `open` 명령으로 .app 번들을 실행 (Launch Services 등록 필요)
     let _ = std::process::Command::new("open")
+        .arg("-n")
         .arg(&app_dir)
         .arg("--args")
         .args(std::env::args_os().skip(1))
