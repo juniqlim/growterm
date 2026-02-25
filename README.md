@@ -1,64 +1,66 @@
 # juniqterm
 
-Rust로 만든 GPU 가속 터미널 에뮬레이터. macOS 지원.
+[한국어](README.ko.md)
 
-## 설계 목표
+A GPU-accelerated terminal emulator written in Rust. macOS support.
 
-코드 변경 시 **테스트로 빠르게 검증**할 수 있는 구조를 만든다.
+## Design Goals
 
-- **캡슐화**: 클립보드 복사를 고칠 때 VT 파서를 몰라도 된다. 각 모듈은 자기 책임만 알면 수정할 수 있다.
-- **테스트**: 순수 함수와 상태 머신은 단위 테스트로, 모듈 간 연동은 통합 테스트로 검증한다.
+Build a structure where code changes can be **quickly verified with tests**.
 
-## 특징
+- **Encapsulation**: You don't need to know the VT parser to fix clipboard copy. Each module can be modified knowing only its own responsibility.
+- **Testing**: Pure functions and state machines are verified with unit tests; module interactions with integration tests.
 
-- **GPU 렌더링** — wgpu 기반 2-pass 렌더링 (배경 + 글리프)
-- **한글 지원** — IME 입력, 와이드 문자 처리, D2Coding 폰트
-- **VT 파싱** — SGR 속성, 256/RGB 컬러, 커서 이동, 화면 지우기
-- **마우스 선택 & 클립보드** — 드래그 선택, Cmd+C/V
-- **폰트 줌** — Cmd+=/- 로 크기 조절
-- **블록/박스 드로잉 문자** — 기하학적 렌더링
+## Features
 
-## 아키텍처
+- **GPU Rendering** — wgpu-based 2-pass rendering (background + glyphs)
+- **Korean Support** — IME input, wide character handling, D2Coding font
+- **VT Parsing** — SGR attributes, 256/RGB color, cursor movement, screen clearing
+- **Mouse Selection & Clipboard** — Drag selection, Cmd+C/V
+- **Font Zoom** — Cmd+=/- to adjust size
+- **Block/Box Drawing Characters** — Geometric rendering
+
+## Architecture
 
 ```
-키 입력 → 입력 인코딩 → PTY
-                         ↓
-                      VT 파서
-                         ↓
-                        그리드
-                         ↓
-                    렌더 커맨드
-                         ↓
-                     GPU 렌더링 → 화면
+Key Input → Input Encoding → PTY
+                              ↓
+                           VT Parser
+                              ↓
+                             Grid
+                              ↓
+                        Render Commands
+                              ↓
+                         GPU Rendering → Screen
 ```
 
-| 모듈 | 역할 |
+| Module | Role |
 |---|---|
-| 공유 타입 | Cell, Color, RenderCommand 등 |
-| VT 파서 | VT100/xterm 이스케이프 시퀀스 파싱 |
-| 그리드 | 터미널 그리드 상태 관리 |
-| 렌더 커맨드 | 그리드 → 렌더 커맨드 변환 |
-| GPU 렌더링 | wgpu 기반 화면 출력 |
-| 입력 인코딩 | 키 입력 → PTY 바이트 변환 |
-| PTY | 셸 프로세스 관리 |
-| 앱 | 이벤트 루프, 모듈 통합 |
+| Shared Types | Cell, Color, RenderCommand, etc. |
+| VT Parser | VT100/xterm escape sequence parsing |
+| Grid | Terminal grid state management |
+| Render Commands | Grid → Render command conversion |
+| GPU Rendering | wgpu-based screen output |
+| Input Encoding | Key input → PTY byte conversion |
+| PTY | Shell process management |
+| App | Event loop, module integration |
 
-## 빌드 & 실행
+## Build & Run
 
 ```bash
 cargo build --release
 cargo run -p juniqterm-app
 ```
 
-## 테스트
+## Test
 
 ```bash
 cargo test
 ```
 
-314개 테스트 (단위 + 통합).
+314 tests (unit + integration).
 
-## 요구사항
+## Requirements
 
 - Rust (stable)
-- macOS (wgpu Metal 백엔드)
+- macOS (wgpu Metal backend)
