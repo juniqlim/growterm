@@ -79,6 +79,67 @@ fn write_and_read_unicode() {
 }
 
 #[test]
+fn term_env_is_set() {
+    let (reader, mut writer) = growterm_pty::spawn(24, 80).expect("failed to spawn");
+
+    writer.write_all(b"echo $TERM\n").expect("write failed");
+
+    let output = read_until(reader, "xterm-256color", Duration::from_secs(3));
+    assert!(
+        output.contains("xterm-256color"),
+        "expected TERM=xterm-256color in output, got: {output}"
+    );
+}
+
+#[test]
+fn lang_env_is_set() {
+    let (reader, mut writer) = growterm_pty::spawn(24, 80).expect("failed to spawn");
+
+    // MARKER로 출력 구간을 식별하여 echo 명령 자체와 구분
+    writer
+        .write_all(b"printf 'LANGVAL=%s\\n' \"${LANG:-NONE}\"\n")
+        .expect("write failed");
+
+    let output = read_until(reader, "LANGVAL=", Duration::from_secs(3));
+    // LANGVAL= 이후 실제 값을 확인
+    assert!(
+        output.contains("LANGVAL=") && !output.contains("LANGVAL=NONE"),
+        "LANG should not be empty (한글 깨짐 원인), got: {output}"
+    );
+}
+
+#[test]
+fn hangul_echo_roundtrip() {
+    let (reader, mut writer) = growterm_pty::spawn(24, 80).expect("failed to spawn");
+
+    // printf로 한글 UTF-8 바이트를 직접 출력하여 쉘의 echo 처리에 의존하지 않음
+    writer
+        .write_all(b"printf '\\xed\\x95\\x9c\\xea\\xb8\\x80\\n'\n")
+        .expect("write failed");
+
+    let output = read_until(reader, "한글", Duration::from_secs(3));
+    // 한글이 깨지지 않고 UTF-8로 정상 출력되는지 확인
+    assert!(
+        output.contains("한글"),
+        "expected '한글' in output (UTF-8 roundtrip), got: {output}"
+    );
+}
+
+#[test]
+fn cwd_is_home() {
+    let (reader, mut writer) = growterm_pty::spawn(24, 80).expect("failed to spawn");
+
+    writer.write_all(b"pwd\n").expect("write failed");
+
+    let home = std::env::var("HOME").expect("HOME not set");
+    let output = read_until(reader, &home, Duration::from_secs(3));
+    assert!(
+        output.contains(&home),
+        "expected cwd to be {home}, got: {output}"
+    );
+}
+
+#[test]
 fn exit_shell() {
     let (reader, mut writer) = growterm_pty::spawn(24, 80).expect("failed to spawn");
 

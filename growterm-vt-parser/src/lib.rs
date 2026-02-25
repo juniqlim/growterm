@@ -592,4 +592,21 @@ mod tests {
             TerminalCommand::Print('글'),
         ]);
     }
+
+    /// UTF-8 바이트가 분할되어 들어와도 올바르게 파싱되는지 확인
+    #[test]
+    fn parse_unicode_split_bytes() {
+        let mut parser = VtParser::new();
+        let bytes = "한".as_bytes(); // 0xED, 0x95, 0x9C
+        assert_eq!(bytes, &[0xED, 0x95, 0x9C]);
+
+        // 바이트를 하나씩 전달
+        let cmds1 = parser.parse(&bytes[..1]); // 0xED
+        let cmds2 = parser.parse(&bytes[1..2]); // 0x95
+        let cmds3 = parser.parse(&bytes[2..3]); // 0x9C
+
+        let all: Vec<_> = [cmds1, cmds2, cmds3].concat();
+        assert_eq!(all, vec![TerminalCommand::Print('한')],
+            "split UTF-8 bytes should produce the same result, got: {all:?}");
+    }
 }

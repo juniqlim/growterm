@@ -257,7 +257,7 @@ fn start_io_thread(
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
-                    let mut state = terminal.lock().unwrap();
+                        let mut state = terminal.lock().unwrap();
                     let commands = state.vt_parser.parse(&buf[..n]);
                     for cmd in &commands {
                         state.grid.apply(cmd);
