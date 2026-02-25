@@ -466,6 +466,72 @@ fn erase_in_display_entire_screen() {
     }
 }
 
+// === Erase preserves current background color ===
+
+#[test]
+fn erase_in_line_preserves_current_bg() {
+    let mut grid = Grid::new(10, 1);
+    for c in "ABCDE".chars() {
+        grid.apply(&TerminalCommand::Print(c));
+    }
+    // Set background to blue, then erase from cursor to end
+    grid.apply(&TerminalCommand::SetBackground(Color::Rgb(Rgb::new(0, 0, 255))));
+    grid.apply(&TerminalCommand::CursorPosition { row: 1, col: 3 }); // col 2
+    grid.apply(&TerminalCommand::EraseInLine(0));
+    // Erased cells should have blue background
+    assert_eq!(grid.cells()[0][2].bg, Color::Rgb(Rgb::new(0, 0, 255)));
+    assert_eq!(grid.cells()[0][9].bg, Color::Rgb(Rgb::new(0, 0, 255)));
+    // Non-erased cells should keep original bg
+    assert_eq!(grid.cells()[0][0].bg, Color::Default);
+}
+
+#[test]
+fn erase_in_line_start_to_cursor_preserves_bg() {
+    let mut grid = Grid::new(10, 1);
+    for c in "ABCDEFGHIJ".chars() {
+        grid.apply(&TerminalCommand::Print(c));
+    }
+    grid.apply(&TerminalCommand::SetBackground(Color::Indexed(1)));
+    grid.apply(&TerminalCommand::CursorPosition { row: 1, col: 4 }); // col 3
+    grid.apply(&TerminalCommand::EraseInLine(1));
+    // Erased cells (0..=3) should have indexed(1) bg
+    assert_eq!(grid.cells()[0][0].bg, Color::Indexed(1));
+    assert_eq!(grid.cells()[0][3].bg, Color::Indexed(1));
+    // Non-erased cells keep original bg
+    assert_eq!(grid.cells()[0][4].bg, Color::Default);
+}
+
+#[test]
+fn erase_in_display_preserves_current_bg() {
+    let mut grid = Grid::new(5, 3);
+    for r in 0..3 {
+        grid.apply(&TerminalCommand::CursorPosition { row: r + 1, col: 1 });
+        for c in "ABCDE".chars() {
+            grid.apply(&TerminalCommand::Print(c));
+        }
+    }
+    grid.apply(&TerminalCommand::SetBackground(Color::Rgb(Rgb::new(50, 50, 50))));
+    grid.apply(&TerminalCommand::CursorPosition { row: 2, col: 3 }); // row 1, col 2
+    grid.apply(&TerminalCommand::EraseInDisplay(0));
+    // Erased cells should have the set bg
+    assert_eq!(grid.cells()[1][2].bg, Color::Rgb(Rgb::new(50, 50, 50)));
+    assert_eq!(grid.cells()[2][0].bg, Color::Rgb(Rgb::new(50, 50, 50)));
+    // Non-erased cells keep original bg
+    assert_eq!(grid.cells()[0][0].bg, Color::Default);
+}
+
+#[test]
+fn erase_with_default_bg_uses_default() {
+    let mut grid = Grid::new(5, 1);
+    for c in "ABCDE".chars() {
+        grid.apply(&TerminalCommand::Print(c));
+    }
+    // current_bg is Default, erase should use default bg
+    grid.apply(&TerminalCommand::CursorPosition { row: 1, col: 1 });
+    grid.apply(&TerminalCommand::EraseInLine(0));
+    assert_eq!(grid.cells()[0][0].bg, Color::Default);
+}
+
 // === Step 8: Resize ===
 
 #[test]

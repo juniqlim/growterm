@@ -177,22 +177,32 @@ impl Grid {
         self.cells.push(vec![Cell::default(); self.cols]);
     }
 
+    fn blank_cell(&self) -> Cell {
+        Cell {
+            character: ' ',
+            fg: Color::Default,
+            bg: self.current_bg,
+            flags: CellFlags::empty(),
+        }
+    }
+
     fn erase_in_line(&mut self, mode: u16) {
         let row = self.cursor_row;
+        let blank = self.blank_cell();
         match mode {
             0 => {
                 for col in self.cursor_col..self.cols {
-                    self.cells[row][col] = Cell::default();
+                    self.cells[row][col] = blank;
                 }
             }
             1 => {
                 for col in 0..=self.cursor_col {
-                    self.cells[row][col] = Cell::default();
+                    self.cells[row][col] = blank;
                 }
             }
             2 => {
                 for col in 0..self.cols {
-                    self.cells[row][col] = Cell::default();
+                    self.cells[row][col] = blank;
                 }
             }
             _ => {}
@@ -200,13 +210,14 @@ impl Grid {
     }
 
     fn erase_in_display(&mut self, mode: u16) {
+        let blank = self.blank_cell();
         match mode {
             0 => {
                 // Erase from cursor to end
                 self.erase_in_line(0);
                 for row in (self.cursor_row + 1)..self.rows {
                     for col in 0..self.cols {
-                        self.cells[row][col] = Cell::default();
+                        self.cells[row][col] = blank;
                     }
                 }
             }
@@ -214,7 +225,7 @@ impl Grid {
                 // Erase from start to cursor
                 for row in 0..self.cursor_row {
                     for col in 0..self.cols {
-                        self.cells[row][col] = Cell::default();
+                        self.cells[row][col] = blank;
                     }
                 }
                 self.erase_in_line(1);
@@ -222,7 +233,7 @@ impl Grid {
             2 => {
                 for row in 0..self.rows {
                     for col in 0..self.cols {
-                        self.cells[row][col] = Cell::default();
+                        self.cells[row][col] = blank;
                     }
                 }
             }

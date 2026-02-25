@@ -62,7 +62,16 @@ pub fn generate(
                 continue;
             }
 
-            let mut fg = resolve_color(cell.fg, DEFAULT_FG);
+            // BOLD + standard color (0-7) → bright color (8-15)
+            let fg_color = if cell.flags.contains(CellFlags::BOLD) {
+                match cell.fg {
+                    Color::Indexed(idx) if idx < 8 => Color::Indexed(idx + 8),
+                    other => other,
+                }
+            } else {
+                cell.fg
+            };
+            let mut fg = resolve_color(fg_color, DEFAULT_FG);
             let mut bg = resolve_color(cell.bg, DEFAULT_BG);
 
             // Cursor: swap fg/bg at cursor position
@@ -479,5 +488,56 @@ mod tests {
         let cmds_no_cursor = generate(&cells, None, Some("한"));
         let cmds_no_preedit = generate(&cells, None, None);
         assert_eq!(cmds_no_cursor.len(), cmds_no_preedit.len());
+    }
+
+    // --- BOLD color promotion tests ---
+
+    #[test]
+    fn bold_promotes_standard_to_bright() {
+        let cell = Cell {
+            character: 'B',
+            fg: Color::Indexed(1), // red (204,0,0)
+            bg: Color::Default,
+            flags: CellFlags::BOLD,
+        };
+        let cmds = generate(&vec![vec![cell]], None, None);
+        // BOLD + Indexed(1) → Indexed(9) = bright red (255,0,0)
+        assert_eq!(cmds[0].fg, Rgb::new(255, 0, 0));
+    }
+
+    #[test]
+    fn bold_does_not_affect_bright_colors() {
+        let cell = Cell {
+            character: 'B',
+            fg: Color::Indexed(9), // bright red (255,0,0)
+            bg: Color::Default,
+            flags: CellFlags::BOLD,
+        };
+        let cmds = generate(&vec![vec![cell]], None, None);
+        assert_eq!(cmds[0].fg, Rgb::new(255, 0, 0));
+    }
+
+    #[test]
+    fn bold_does_not_affect_rgb_colors() {
+        let cell = Cell {
+            character: 'B',
+            fg: Color::Rgb(Rgb::new(100, 150, 200)),
+            bg: Color::Default,
+            flags: CellFlags::BOLD,
+        };
+        let cmds = generate(&vec![vec![cell]], None, None);
+        assert_eq!(cmds[0].fg, Rgb::new(100, 150, 200));
+    }
+
+    #[test]
+    fn bold_does_not_affect_default_color() {
+        let cell = Cell {
+            character: 'B',
+            fg: Color::Default,
+            bg: Color::Default,
+            flags: CellFlags::BOLD,
+        };
+        let cmds = generate(&vec![vec![cell]], None, None);
+        assert_eq!(cmds[0].fg, DEFAULT_FG);
     }
 }

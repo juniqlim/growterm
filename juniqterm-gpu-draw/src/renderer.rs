@@ -30,6 +30,7 @@ pub struct GpuDrawer {
     queue: wgpu::Queue,
     surface: wgpu::Surface<'static>,
     surface_config: wgpu::SurfaceConfiguration,
+    render_format: wgpu::TextureFormat,
     bg_pipeline: wgpu::RenderPipeline,
     glyph_pipeline: wgpu::RenderPipeline,
     uniform_buffer: wgpu::Buffer,
@@ -87,21 +88,28 @@ impl GpuDrawer {
 
         let size = window.inner_size();
         let surface_caps = surface.get_capabilities(&adapter);
-        let format = surface_caps
-            .formats
-            .iter()
-            .find(|f| f.is_srgb())
-            .copied()
-            .unwrap_or(surface_caps.formats[0]);
+        let surface_format = surface_caps.formats[0];
+
+        // Use non-sRGB view to avoid double gamma encoding of ANSI colors
+        let render_format = match surface_format {
+            wgpu::TextureFormat::Bgra8UnormSrgb => wgpu::TextureFormat::Bgra8Unorm,
+            wgpu::TextureFormat::Rgba8UnormSrgb => wgpu::TextureFormat::Rgba8Unorm,
+            other => other,
+        };
+        let view_formats = if render_format != surface_format {
+            vec![render_format]
+        } else {
+            vec![]
+        };
 
         let surface_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format,
+            format: surface_format,
             width: size.width.max(1),
             height: size.height.max(1),
             present_mode: wgpu::PresentMode::Fifo,
             alpha_mode: surface_caps.alpha_modes[0],
-            view_formats: vec![],
+            view_formats,
             desired_maximum_frame_latency: 2,
         };
         surface.configure(&device, &surface_config);
@@ -231,7 +239,7 @@ impl GpuDrawer {
                 module: &bg_shader,
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format,
+                    format: render_format,
                     blend: None,
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
@@ -274,7 +282,7 @@ impl GpuDrawer {
                 module: &glyph_shader,
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format,
+                    format: render_format,
                     blend: Some(wgpu::BlendState {
                         color: wgpu::BlendComponent {
                             src_factor: wgpu::BlendFactor::SrcAlpha,
@@ -301,6 +309,7 @@ impl GpuDrawer {
             queue,
             surface,
             surface_config,
+            render_format,
             bg_pipeline,
             glyph_pipeline,
             uniform_buffer,
@@ -349,9 +358,10 @@ impl GpuDrawer {
             Ok(t) => t,
             Err(_) => return,
         };
-        let view = output
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
+        let view = output.texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(self.render_format),
+            ..Default::default()
+        });
 
         let (cell_w, cell_h) = self.atlas.cell_size();
 
