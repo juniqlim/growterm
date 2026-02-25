@@ -7,6 +7,7 @@ use juniqterm_grid::Grid;
 use juniqterm_macos::{AppEvent, MacWindow, Modifiers};
 use juniqterm_vt_parser::VtParser;
 
+use crate::jamo_compose::{is_single_jamo, JamoBuffer};
 use crate::zoom;
 
 struct TerminalState {
@@ -38,8 +39,8 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
     };
 
     let mut preedit = String::new();
+    let mut jamo_buf = JamoBuffer::new();
     let grid_dump_path = std::env::var("JUNIQTERM_GRID_DUMP").ok();
-    let mut grid_dumped = false;
     let test_input = std::env::var("JUNIQTERM_TEST_INPUT").ok();
     let mut test_input_sent = false;
 
@@ -47,8 +48,20 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
         match event {
             AppEvent::TextCommit(text) => {
                 preedit.clear();
-                let _ = pty_writer.write_all(text.as_bytes());
-                let _ = pty_writer.flush();
+                if jamo_buf.is_active() || is_single_jamo(&text).is_some() {
+                    if let Some(composed) = jamo_buf.push(&text) {
+                        let composed: String = composed;
+                        let _ = pty_writer.write_all(composed.as_bytes());
+                        let _ = pty_writer.flush();
+                    }
+                } else {
+                    if let Some(flushed) = jamo_buf.flush() {
+                        let flushed: String = flushed;
+                        let _ = pty_writer.write_all(flushed.as_bytes());
+                    }
+                    let _ = pty_writer.write_all(text.as_bytes());
+                    let _ = pty_writer.flush();
+                }
             }
             AppEvent::Preedit(text) => {
                 preedit = text;
@@ -125,8 +138,12 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
             AppEvent::RedrawRequested => {
                 let was_dirty = dirty.swap(false, Ordering::Relaxed);
                 render(&mut drawer, &terminal, &preedit);
-                if was_dirty && !grid_dumped {
+                if was_dirty {
                     if let Some(ref path) = grid_dump_path {
+                        let dump_file = std::path::Path::new(path);
+                        if dump_file.exists() {
+                            continue;
+                        }
                         let state = terminal.lock().unwrap();
                         let has_content = state.grid.cells().iter().any(|row| {
                             row.iter().any(|c| c.character != '\0' && c.character != ' ')
@@ -151,7 +168,6 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                                 }
                             }
                             let _ = std::fs::write(path, &dump);
-                            grid_dumped = true;
                         }
                     }
                 }

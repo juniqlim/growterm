@@ -161,3 +161,39 @@ fn echo_command_output_appears_in_app() {
         "expected 'HELLO_JUNIQTERM' in grid after echo command, got:\n{all_text}"
     );
 }
+
+#[test]
+fn echo_korean_output_appears_in_app() {
+    let bin = build_binary();
+    let dump_path = std::env::temp_dir().join(format!(
+        "juniqterm_grid_dump_korean_{}.txt",
+        std::process::id()
+    ));
+
+    let mut child = Command::new(&bin)
+        .env("JUNIQTERM_GRID_DUMP", &dump_path)
+        .env("JUNIQTERM_TEST_INPUT", "echo 안녕하세요\n")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to launch juniqterm");
+
+    let dump_content = wait_for_dump(&mut child, &dump_path);
+
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = std::fs::remove_file(&dump_path);
+
+    let content = dump_content.expect("grid dump file was not created within timeout");
+    let (_cursor_row, _cursor_col, rows) = parse_dump(&content);
+
+    let all_text: String = rows.join("\n");
+    // Wide characters(한글)는 그리드에서 2칸을 차지하므로
+    // 공백 제거 후 비교
+    let compact: String = all_text.chars().filter(|c| *c != ' ' && *c != '\0').collect();
+    assert!(
+        compact.contains("안녕하세요"),
+        "expected '안녕하세요' in grid after echo command, got:\n{all_text}"
+    );
+}
