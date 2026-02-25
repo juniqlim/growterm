@@ -17,7 +17,7 @@ use crate::event_action::{self, Action, ImeHandler};
 use crate::key_convert::convert_key;
 use crate::zoom;
 
-const FONT_SIZE: f32 = 24.0;
+const FONT_SIZE: f32 = 32.0;
 
 pub struct TerminalState {
     pub grid: Grid,
