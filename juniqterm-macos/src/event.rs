@@ -13,6 +13,14 @@ pub enum AppEvent {
     CloseRequested,
     /// 리드로우 요청
     RedrawRequested,
+    /// 마우스 버튼 누름 (x, y in backing pixels)
+    MouseDown(f64, f64),
+    /// 마우스 드래그 (x, y in backing pixels)
+    MouseDragged(f64, f64),
+    /// 마우스 버튼 뗌 (x, y in backing pixels)
+    MouseUp(f64, f64),
+    /// 마우스 스크롤 (delta_y: 양수=위, 음수=아래)
+    ScrollWheel(f64),
 }
 
 bitflags::bitflags! {

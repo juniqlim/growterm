@@ -16,6 +16,10 @@ pub mod keycode {
     pub const END: u16 = 0x77;
     pub const PAGE_UP: u16 = 0x74;
     pub const PAGE_DOWN: u16 = 0x79;
+    pub const ANSI_Q: u16 = 0x0C;
+    pub const ANSI_V: u16 = 0x09;
+    pub const ANSI_EQUAL: u16 = 0x18;
+    pub const ANSI_MINUS: u16 = 0x1B;
 }
 
 /// macOS keycode + characters → juniqterm_types::KeyEvent 변환

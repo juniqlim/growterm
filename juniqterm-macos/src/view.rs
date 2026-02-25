@@ -61,6 +61,23 @@ define_class! {
             self.send_event(AppEvent::RedrawRequested);
         }
 
+        /// Cmd 키 조합 (Cmd+V, Cmd+=/- 등)을 메뉴 시스템보다 먼저 가로챔.
+        /// 이 메서드가 true를 반환하면 keyDown:이 호출되지 않으므로
+        /// Cmd 조합은 여기서 직접 KeyInput 이벤트로 전달한다.
+        #[unsafe(method(performKeyEquivalent:))]
+        fn perform_key_equivalent(&self, event: &NSEvent) -> objc2::runtime::Bool {
+            let flags = event.modifierFlags();
+            if flags.contains(NSEventModifierFlags::Command) {
+                // Cmd+Q는 메뉴(terminate:)로 처리
+                if event.keyCode() == crate::key_convert::keycode::ANSI_Q {
+                    return objc2::runtime::Bool::NO;
+                }
+                self.dispatch_key_event(event);
+                return objc2::runtime::Bool::YES;
+            }
+            objc2::runtime::Bool::NO
+        }
+
         #[unsafe(method(keyDown:))]
         fn key_down(&self, event: &NSEvent) {
             self.ivars().ime_state.set(ImeState::None);
@@ -87,6 +104,39 @@ define_class! {
         #[unsafe(method(flagsChanged:))]
         fn flags_changed(&self, _event: &NSEvent) {
             // modifier 변경은 별도로 처리하지 않음
+        }
+
+        #[unsafe(method(mouseDown:))]
+        fn mouse_down(&self, event: &NSEvent) {
+            let (x, y) = self.event_location_in_backing(event);
+            self.send_event(AppEvent::MouseDown(x, y));
+        }
+
+        #[unsafe(method(mouseDragged:))]
+        fn mouse_dragged(&self, event: &NSEvent) {
+            let (x, y) = self.event_location_in_backing(event);
+            self.send_event(AppEvent::MouseDragged(x, y));
+        }
+
+        #[unsafe(method(mouseUp:))]
+        fn mouse_up(&self, event: &NSEvent) {
+            let (x, y) = self.event_location_in_backing(event);
+            self.send_event(AppEvent::MouseUp(x, y));
+        }
+
+        #[unsafe(method(scrollWheel:))]
+        fn scroll_wheel(&self, event: &NSEvent) {
+            let delta_y = if event.hasPreciseScrollingDeltas() {
+                // 트랙패드: 픽셀 단위 → 그대로 전달 (app에서 누적)
+                event.scrollingDeltaY()
+            } else {
+                // 마우스 휠: line 단위 → 셀 높이를 곱해서 픽셀 단위로 변환
+                let scale = self.backing_scale_factor();
+                event.scrollingDeltaY() * 40.0 * scale
+            };
+            if delta_y != 0.0 {
+                self.send_event(AppEvent::ScrollWheel(delta_y));
+            }
         }
 
         #[unsafe(method(setFrameSize:))]
@@ -252,6 +302,14 @@ impl TerminalView {
             characters,
             modifiers,
         });
+    }
+
+    fn event_location_in_backing(&self, event: &NSEvent) -> (f64, f64) {
+        let loc = event.locationInWindow();
+        let local = self.convertPoint_fromView(loc, None);
+        let scale = self.backing_scale_factor();
+        // NSView is flipped (isFlipped returns true), so y is already top-down
+        (local.x * scale, local.y * scale)
     }
 
     fn backing_scale_factor(&self) -> f64 {

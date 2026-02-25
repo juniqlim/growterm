@@ -20,6 +20,10 @@ pub mod test_support {
         TerminalView::new(mtm)
     }
 
+    pub fn set_view_sender(view: &TerminalView, sender: std::sync::mpsc::Sender<crate::AppEvent>) {
+        view.set_sender(sender);
+    }
+
     pub fn setup_menu(app: &objc2_app_kit::NSApplication) {
         crate::setup_main_menu(app);
     }

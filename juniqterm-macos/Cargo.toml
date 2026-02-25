@@ -28,3 +28,7 @@ bitflags = "2"
 [[test]]
 name = "cmd_q_quit"
 harness = false
+
+[[test]]
+name = "cmd_v_paste_event"
+harness = false
