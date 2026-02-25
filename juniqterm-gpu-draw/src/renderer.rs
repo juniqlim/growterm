@@ -60,7 +60,10 @@ struct GlyphRegion {
 const GLYPH_TEXTURE_SIZE: u32 = 1024;
 
 impl GpuDrawer {
-    pub fn new(window: std::sync::Arc<winit::window::Window>, font_size: f32) -> Self {
+    pub fn new<W>(window: std::sync::Arc<W>, width: u32, height: u32, font_size: f32) -> Self
+    where
+        W: raw_window_handle::HasWindowHandle + raw_window_handle::HasDisplayHandle + Send + Sync + 'static,
+    {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
             ..Default::default()
@@ -85,8 +88,6 @@ impl GpuDrawer {
             None,
         ))
         .unwrap();
-
-        let size = window.inner_size();
         let surface_caps = surface.get_capabilities(&adapter);
         let surface_format = surface_caps.formats[0];
 
@@ -105,8 +106,8 @@ impl GpuDrawer {
         let surface_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
-            width: size.width.max(1),
-            height: size.height.max(1),
+            width: width.max(1),
+            height: height.max(1),
             present_mode: wgpu::PresentMode::Fifo,
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats,
@@ -116,7 +117,7 @@ impl GpuDrawer {
 
         // Uniform buffer
         let uniforms = Uniforms {
-            screen_size: [size.width as f32, size.height as f32],
+            screen_size: [width as f32, height as f32],
             _padding: [0.0; 2],
         };
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

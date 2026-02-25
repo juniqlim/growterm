@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 juniqterm-types = { path = "../juniqterm-types" }
 wgpu = "24"
-winit = "0.30"
+raw-window-handle = "0.6"
 fontdue = "0.9"
 bytemuck = { version = "1", features = ["derive"] }
 pollster = "0.4"
@@ -23,6 +23,7 @@ name = "integration_render_cmd"
 name = "integration_vt_parser"
 
 [dev-dependencies]
+winit = "0.30"
 juniqterm-render-cmd = { path = "../juniqterm-render-cmd" }
 juniqterm-vt-parser = { path = "../juniqterm-vt-parser" }
 juniqterm-grid = { path = "../juniqterm-grid" }

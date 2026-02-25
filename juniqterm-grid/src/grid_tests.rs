@@ -332,6 +332,38 @@ fn backspace_clamps_at_zero() {
 }
 
 #[test]
+fn delete_chars_shifts_left_and_fills_blank() {
+    let mut grid = Grid::new(80, 24);
+    // Write "ABCDE"
+    for c in "ABCDE".chars() {
+        grid.apply(&TerminalCommand::Print(c));
+    }
+    // Move cursor to col 1 (B)
+    grid.apply(&TerminalCommand::CursorPosition { row: 1, col: 2 });
+    // Delete 2 chars at cursor
+    grid.apply(&TerminalCommand::DeleteChars(2));
+    // B,C removed; D,E shift left
+    assert_eq!(grid.cells()[0][0].character, 'A');
+    assert_eq!(grid.cells()[0][1].character, 'D');
+    assert_eq!(grid.cells()[0][2].character, 'E');
+    assert_eq!(grid.cells()[0][3].character, ' ');
+    assert_eq!(grid.cells()[0][4].character, ' ');
+}
+
+#[test]
+fn delete_chars_at_end_clears() {
+    let mut grid = Grid::new(80, 24);
+    for c in "AB".chars() {
+        grid.apply(&TerminalCommand::Print(c));
+    }
+    // cursor at col 1
+    grid.apply(&TerminalCommand::CursorPosition { row: 1, col: 2 });
+    grid.apply(&TerminalCommand::DeleteChars(5));
+    assert_eq!(grid.cells()[0][0].character, 'A');
+    assert_eq!(grid.cells()[0][1].character, ' ');
+}
+
+#[test]
 fn tab_advances_to_next_tabstop() {
     let mut grid = Grid::new(80, 24);
     grid.apply(&TerminalCommand::Print('A'));

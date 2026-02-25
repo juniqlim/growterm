@@ -93,6 +93,7 @@ impl Grid {
                 }
             }
             TerminalCommand::Bell => {}
+            TerminalCommand::DeleteChars(n) => self.delete_chars(*n),
             TerminalCommand::EraseInLine(mode) => self.erase_in_line(*mode),
             TerminalCommand::EraseInDisplay(mode) => self.erase_in_display(*mode),
         }
@@ -232,6 +233,20 @@ impl Grid {
             fg: Color::Default,
             bg: self.current_bg,
             flags: CellFlags::empty(),
+        }
+    }
+
+    fn delete_chars(&mut self, n: u16) {
+        let n = n as usize;
+        let row = self.cursor_row;
+        let col = self.cursor_col;
+        let blank = self.blank_cell();
+        for i in col..self.cols {
+            if i + n < self.cols {
+                self.cells[row][i] = self.cells[row][i + n];
+            } else {
+                self.cells[row][i] = blank;
+            }
         }
     }
 

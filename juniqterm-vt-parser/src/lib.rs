@@ -136,6 +136,7 @@ impl vte::Perform for Handler {
             }
             'J' => self.commands.push(TerminalCommand::EraseInDisplay(first)),
             'K' => self.commands.push(TerminalCommand::EraseInLine(first)),
+            'P' => self.commands.push(TerminalCommand::DeleteChars(first.max(1))),
             'm' => self.handle_sgr(params),
             _ => {} // ignore unknown CSI
         }
@@ -507,6 +508,22 @@ mod tests {
         // ESC[2J = erase entire display
         let cmds = parser.parse(b"\x1b[2J");
         assert_eq!(cmds, vec![TerminalCommand::EraseInDisplay(2)]);
+    }
+
+    // --- Delete Characters (DCH) ---
+
+    #[test]
+    fn parse_delete_chars() {
+        let mut parser = VtParser::new();
+        let cmds = parser.parse(b"\x1b[2P");
+        assert_eq!(cmds, vec![TerminalCommand::DeleteChars(2)]);
+    }
+
+    #[test]
+    fn parse_delete_chars_default() {
+        let mut parser = VtParser::new();
+        let cmds = parser.parse(b"\x1b[P");
+        assert_eq!(cmds, vec![TerminalCommand::DeleteChars(1)]);
     }
 
     // --- Mixed content ---

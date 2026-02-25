@@ -65,7 +65,8 @@ impl ApplicationHandler for App {
             .with_title("juniqterm - integration: bytes → VtParser → Grid → generate → draw")
             .with_inner_size(winit::dpi::LogicalSize::new(900, 500));
         let window = Arc::new(event_loop.create_window(attrs).unwrap());
-        let drawer = GpuDrawer::new(window.clone(), 24.0);
+        let size = window.inner_size();
+        let drawer = GpuDrawer::new(window.clone(), size.width, size.height, 24.0);
         self.window = Some(window);
         self.drawer = Some(drawer);
     }

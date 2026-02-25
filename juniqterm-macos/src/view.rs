@@ -55,6 +55,11 @@ define_class! {
             true
         }
 
+        #[unsafe(method(updateLayer))]
+        fn update_layer(&self) {
+            self.send_event(AppEvent::RedrawRequested);
+        }
+
         #[unsafe(method(keyDown:))]
         fn key_down(&self, event: &NSEvent) {
             self.ivars().ime_state.set(ImeState::None);

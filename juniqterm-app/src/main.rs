@@ -1,15 +1,20 @@
 mod app;
+#[allow(dead_code)]
 mod event_action;
-mod key_convert;
+#[allow(dead_code)]
 mod selection;
 mod zoom;
 
-use app::App;
-use winit::event_loop::EventLoop;
+const FONT_SIZE: f32 = 32.0;
 
 fn main() {
-    let event_loop = EventLoop::with_user_event().build().unwrap();
-    let proxy = event_loop.create_proxy();
-    let mut app = App::new(proxy);
-    event_loop.run_app(&mut app).unwrap();
+    juniqterm_macos::run(|window, rx| {
+        // GpuDrawer must be created on the main thread (Metal requirement)
+        let (width, height) = window.inner_size();
+        let drawer = juniqterm_gpu_draw::GpuDrawer::new(window.clone(), width, height, FONT_SIZE);
+
+        std::thread::spawn(move || {
+            app::run(window, rx, drawer);
+        });
+    });
 }

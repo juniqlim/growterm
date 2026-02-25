@@ -112,6 +112,7 @@ pub enum TerminalCommand {
     Backspace,
     Tab,
     Bell,
+    DeleteChars(u16),
 }
 
 // --- Key & Modifiers ---

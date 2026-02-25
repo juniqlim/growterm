@@ -15,7 +15,7 @@ juniqterm-vt-parser = { path = "../juniqterm-vt-parser" }
 juniqterm-grid = { path = "../juniqterm-grid" }
 juniqterm-pty = { path = "../juniqterm-pty" }
 juniqterm-input = { path = "../juniqterm-input" }
-winit = "0.30"
+juniqterm-macos = { path = "../juniqterm-macos" }
 libc = "0.2"
 arboard = "3"
 unicode-width = "0.2.2"

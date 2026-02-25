@@ -12,7 +12,7 @@ use std::sync::mpsc;
 
 use objc2::runtime::ProtocolObject;
 use objc2::MainThreadMarker;
-use objc2_app_kit::{NSApplication, NSApplicationDelegate};
+use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate};
 
 use delegate::AppDelegate;
 
@@ -24,6 +24,7 @@ pub fn run(setup: impl FnOnce(std::sync::Arc<MacWindow>, mpsc::Receiver<AppEvent
     let mtm = MainThreadMarker::new().expect("must be called from main thread");
 
     let app = NSApplication::sharedApplication(mtm);
+    app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
     let delegate = AppDelegate::new(mtm);
     let delegate_proto: &ProtocolObject<dyn NSApplicationDelegate> =
         ProtocolObject::from_ref(&*delegate);
