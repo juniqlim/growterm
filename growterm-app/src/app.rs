@@ -41,11 +41,20 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
     let mut preedit = String::new();
     let mut sel = Selection::default();
     let mut scroll_accum: f64 = 0.0;
+    let mut deferred: Option<AppEvent> = None;
     let grid_dump_path = std::env::var("GROWTERM_GRID_DUMP").ok();
     let test_input = std::env::var("GROWTERM_TEST_INPUT").ok();
     let mut test_input_sent = false;
 
-    for event in rx {
+    loop {
+        let event = if let Some(evt) = deferred.take() {
+            evt
+        } else {
+            match rx.recv() {
+                Ok(evt) => evt,
+                Err(_) => break,
+            }
+        };
         match event {
             AppEvent::TextCommit(text) => {
                 preedit.clear();
@@ -165,7 +174,15 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     render(&mut drawer, &terminal, &preedit, &sel);
                 }
             }
-            AppEvent::Resize(w, h) => {
+            AppEvent::Resize(mut w, mut h) => {
+                // Coalesce queued resize events to avoid redundant GPU work
+                loop {
+                    match rx.try_recv() {
+                        Ok(AppEvent::Resize(nw, nh)) => { w = nw; h = nh; }
+                        Ok(other) => { deferred = Some(other); break; }
+                        Err(_) => break,
+                    }
+                }
                 drawer.resize(w, h);
                 let (cw, ch) = drawer.cell_size();
                 let (cols, rows) = zoom::calc_grid_size(w, h, cw, ch);

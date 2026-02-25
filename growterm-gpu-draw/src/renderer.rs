@@ -43,6 +43,7 @@ pub struct GpuDrawer {
     atlas_cursor_y: u32,
     atlas_row_height: u32,
     glyph_regions: std::collections::HashMap<char, GlyphRegion>,
+    surface_dirty: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -323,6 +324,7 @@ impl GpuDrawer {
             atlas_cursor_y: 0,
             atlas_row_height: 0,
             glyph_regions: std::collections::HashMap::new(),
+            surface_dirty: false,
         }
     }
 
@@ -338,16 +340,12 @@ impl GpuDrawer {
         if width == 0 || height == 0 {
             return;
         }
+        if self.surface_config.width == width && self.surface_config.height == height {
+            return;
+        }
         self.surface_config.width = width;
         self.surface_config.height = height;
-        self.surface.configure(&self.device, &self.surface_config);
-
-        let uniforms = Uniforms {
-            screen_size: [width as f32, height as f32],
-            _padding: [0.0; 2],
-        };
-        self.queue
-            .write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
+        self.surface_dirty = true;
     }
 
     pub fn cell_size(&self) -> (f32, f32) {
@@ -355,6 +353,15 @@ impl GpuDrawer {
     }
 
     pub fn draw(&mut self, commands: &[RenderCommand], scrollbar: Option<(f32, f32)>) {
+        if self.surface_dirty {
+            self.surface_dirty = false;
+            self.surface.configure(&self.device, &self.surface_config);
+            let uniforms = Uniforms {
+                screen_size: [self.surface_config.width as f32, self.surface_config.height as f32],
+                _padding: [0.0; 2],
+            };
+            self.queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
+        }
         let output = match self.surface.get_current_texture() {
             Ok(t) => t,
             Err(_) => return,

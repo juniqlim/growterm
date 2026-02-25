@@ -1,5 +1,6 @@
 use std::cell::{Cell, RefCell};
 use std::sync::mpsc::Sender;
+use std::time::Instant;
 
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Sel};
@@ -29,6 +30,8 @@ pub struct Ivars {
     ime_state: Cell<ImeState>,
     marked_text: RefCell<String>,
     current_event: RefCell<Option<Retained<NSEvent>>>,
+    last_resize_sent: Cell<Option<Instant>>,
+    pending_resize: Cell<Option<(u32, u32)>>,
 }
 
 define_class! {
@@ -142,13 +145,27 @@ define_class! {
         #[unsafe(method(setFrameSize:))]
         fn set_frame_size(&self, new_size: objc2_foundation::NSSize) {
             let _: () = unsafe { msg_send![super(self), setFrameSize: new_size] };
-            if let Some(layer) = self.layer() {
-                layer.setNeedsDisplay();
-            }
             let scale = self.backing_scale_factor();
             let w = (new_size.width * scale) as u32;
             let h = (new_size.height * scale) as u32;
-            if w > 0 && h > 0 {
+            if w == 0 || h == 0 {
+                return;
+            }
+
+            if self.inLiveResize() {
+                // During live resize: just stash the size, let Core Animation scale
+                self.ivars().pending_resize.set(Some((w, h)));
+            } else {
+                self.ivars().pending_resize.set(None);
+                self.send_event(AppEvent::Resize(w, h));
+            }
+        }
+
+        #[unsafe(method(viewDidEndLiveResize))]
+        fn view_did_end_live_resize(&self) {
+            let _: () = unsafe { msg_send![super(self), viewDidEndLiveResize] };
+            if let Some((w, h)) = self.ivars().pending_resize.get() {
+                self.ivars().pending_resize.set(None);
                 self.send_event(AppEvent::Resize(w, h));
             }
         }
@@ -271,6 +288,8 @@ impl TerminalView {
             ime_state: Cell::new(ImeState::None),
             marked_text: RefCell::new(String::new()),
             current_event: RefCell::new(None),
+            last_resize_sent: Cell::new(None),
+            pending_resize: Cell::new(None),
         });
         let this: Retained<Self> = unsafe { msg_send![super(this), init] };
         this.setWantsLayer(true);
