@@ -1,4 +1,4 @@
-use juniqterm_types::Cell;
+use juniqterm_types::{Cell, CellFlags};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Selection {
@@ -90,8 +90,14 @@ pub fn extract_text(cells: &[Vec<Cell>], selection: &Selection) -> String {
         };
 
         let mut line_text = String::new();
-        for col in col_start..col_end {
+        let mut col = col_start;
+        while col < col_end {
             line_text.push(line[col].character);
+            if line[col].flags.contains(CellFlags::WIDE_CHAR) {
+                col += 2; // skip spacer cell
+            } else {
+                col += 1;
+            }
         }
         let trimmed = line_text.trim_end();
         result.push_str(trimmed);
@@ -185,6 +191,30 @@ mod tests {
             .collect()
     }
 
+    /// Build cells like the grid does: wide chars get WIDE_CHAR flag + spacer cell
+    fn make_cells_with_wide(lines: &[&str]) -> Vec<Vec<Cell>> {
+        use unicode_width::UnicodeWidthChar;
+        lines
+            .iter()
+            .map(|s| {
+                let mut row = Vec::new();
+                for c in s.chars() {
+                    let w = UnicodeWidthChar::width(c).unwrap_or(1);
+                    row.push(Cell {
+                        character: c,
+                        fg: Color::Default,
+                        bg: Color::Default,
+                        flags: if w == 2 { CellFlags::WIDE_CHAR } else { CellFlags::empty() },
+                    });
+                    if w == 2 {
+                        row.push(Cell::default()); // spacer
+                    }
+                }
+                row
+            })
+            .collect()
+    }
+
     #[test]
     fn extract_text_single_line() {
         let cells = make_cells(&["Hello World"]);
@@ -217,6 +247,26 @@ mod tests {
         let cells = make_cells(&["Hello"]);
         let sel = Selection::default();
         assert_eq!(extract_text(&cells, &sel), "");
+    }
+
+    #[test]
+    fn extract_text_wide_chars_no_spaces() {
+        let cells = make_cells_with_wide(&["안녕하세요"]);
+        // "안녕하세요" → 10 columns (each char = 2 cols)
+        let mut sel = Selection::default();
+        sel.start = (0, 0);
+        sel.end = (0, 9);
+        assert_eq!(extract_text(&cells, &sel), "안녕하세요");
+    }
+
+    #[test]
+    fn extract_text_mixed_ascii_and_wide() {
+        let cells = make_cells_with_wide(&["Hi한글ok"]);
+        // H(0) i(1) 한(2,3) 글(4,5) o(6) k(7)
+        let mut sel = Selection::default();
+        sel.start = (0, 0);
+        sel.end = (0, 7);
+        assert_eq!(extract_text(&cells, &sel), "Hi한글ok");
     }
 
     #[test]

@@ -14,3 +14,4 @@ juniqterm-input = { path = "../juniqterm-input" }
 winit = "0.30"
 libc = "0.2"
 arboard = "3"
+unicode-width = "0.2.2"

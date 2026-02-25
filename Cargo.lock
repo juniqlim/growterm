@@ -827,6 +827,7 @@ dependencies = [
  "juniqterm-types",
  "juniqterm-vt-parser",
  "libc",
+ "unicode-width 0.2.2",
  "winit",
 ]
 
@@ -864,7 +865,9 @@ dependencies = [
 name = "juniqterm-integration-tests"
 version = "0.1.0"
 dependencies = [
+ "juniqterm-gpu-draw",
  "juniqterm-grid",
+ "juniqterm-render-cmd",
  "juniqterm-types",
  "juniqterm-vt-parser",
 ]

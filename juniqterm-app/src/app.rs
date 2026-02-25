@@ -141,6 +141,8 @@ impl ApplicationHandler<()> for App {
         let (cell_w, cell_h) = drawer.cell_size();
         self.cell_size = (cell_w, cell_h);
         let size = window.inner_size();
+        let scale = window.scale_factor();
+        eprintln!("[DEBUG] scale_factor={scale}, inner_size={}x{}, cell=({cell_w}, {cell_h})", size.width, size.height);
         drawer.resize(size.width, size.height);
 
         let (cols, rows) = zoom::calc_grid_size(
@@ -227,10 +229,24 @@ impl ApplicationHandler<()> for App {
                 if self.modifiers.super_key()
                     && event.state == winit::event::ElementState::Pressed
                 {
+                    let is_v = matches!(
+                        event.physical_key,
+                        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyV)
+                    );
                     let key_str = match &event.logical_key {
                         winit::keyboard::Key::Character(s) => Some(s.as_str()),
                         _ => None,
                     };
+                    if is_v {
+                        if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                            if let Ok(text) = clipboard.get_text() {
+                                if !text.is_empty() {
+                                    self.write_pty(text.as_bytes());
+                                }
+                            }
+                        }
+                        return;
+                    }
                     let delta = key_str.and_then(zoom::zoom_delta);
                     if let Some(delta) = delta {
                         self.font_size = zoom::apply_zoom(self.font_size, delta);
@@ -254,6 +270,7 @@ impl ApplicationHandler<()> for App {
                         }
                         return;
                     }
+                    return;
                 }
 
                 if event.state != winit::event::ElementState::Pressed {
