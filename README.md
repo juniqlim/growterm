@@ -1,4 +1,6 @@
-# growterm
+<p align="center">
+  <img src="assets/banner.svg" alt="growTerm banner" width="100%"/>
+</p>
 
 [한국어](README.ko.md)
 
