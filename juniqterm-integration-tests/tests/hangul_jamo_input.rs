@@ -44,8 +44,18 @@ fn wait_for_dump(dump_path: &std::path::Path, timeout: Duration) -> Option<Strin
     None
 }
 
-/// 앱을 실행하고 osascript로 한글 자모(ㅎㅏㄴㄱㅡㄹ)를 키스트로크로 보낸 뒤,
-/// 그리드에 조합된 "한글"이 나타나는지 검증한다.
+fn activate_by_pid(pid: u32) {
+    let script = format!(
+        r#"tell application "System Events"
+            set frontmost of (first process whose unix id is {pid}) to true
+        end tell"#
+    );
+    let _ = Command::new("osascript").arg("-e").arg(&script).output();
+    std::thread::sleep(Duration::from_millis(500));
+}
+
+/// 앱 실행 → osascript로 한글 자모(ㅎㅏㄴㄱㅡㄹ) 전송 → 엔터 →
+/// 그리드에 조합된 "한글"이 나타나는지 검증.
 #[test]
 fn osascript_jamo_keystroke_produces_composed_hangul() {
     let bin = build_binary();
@@ -63,44 +73,21 @@ fn osascript_jamo_keystroke_produces_composed_hangul() {
         .spawn()
         .expect("failed to launch juniqterm");
 
-    // 1단계: 셸 프롬프트 대기
     let prompt = wait_for_dump(&dump_path, Duration::from_secs(10));
     assert!(prompt.is_some(), "셸 프롬프트가 렌더되지 않음");
 
-    // 2단계: PID 기반으로 포커스 → 덤프 파일 삭제 → 한글 자모 전송
     let pid = child.id();
-    let activate_script = format!(
-        r#"tell application "System Events"
-            set frontmost of (first process whose unix id is {pid}) to true
-        end tell"#
-    );
-    let _ = Command::new("osascript")
-        .arg("-e")
-        .arg(&activate_script)
-        .output();
-    std::thread::sleep(Duration::from_millis(500));
+    activate_by_pid(pid);
 
     let _ = std::fs::remove_file(&dump_path);
 
-    let osascript_result = Command::new("osascript")
+    let _ = Command::new("osascript")
         .arg("-e")
         .arg("tell application \"System Events\" to keystroke \"ㅎㅏㄴㄱㅡㄹ\"")
-        .output()
-        .expect("failed to run osascript");
-
-    if !osascript_result.status.success() {
-        let _ = child.kill();
-        let _ = child.wait();
-        let _ = std::fs::remove_file(&dump_path);
-        panic!(
-            "osascript 실패: {}",
-            String::from_utf8_lossy(&osascript_result.stderr)
-        );
-    }
+        .output();
 
     std::thread::sleep(Duration::from_secs(2));
 
-    // 3단계: 엔터를 쳐서 셸 출력 유도 후 새 덤프 대기
     let _ = std::fs::remove_file(&dump_path);
 
     let _ = Command::new("osascript")
@@ -110,7 +97,6 @@ fn osascript_jamo_keystroke_produces_composed_hangul() {
 
     let dump_content = wait_for_dump(&dump_path, Duration::from_secs(10));
 
-    // 정리
     let _ = child.kill();
     let _ = child.wait();
     let _ = std::fs::remove_file(&dump_path);

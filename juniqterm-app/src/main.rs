@@ -1,7 +1,6 @@
 mod app;
 #[allow(dead_code)]
 mod event_action;
-mod jamo_compose;
 #[allow(dead_code)]
 mod selection;
 mod zoom;

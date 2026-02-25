@@ -1,12 +1,25 @@
+use std::cell::RefCell;
+use std::sync::{mpsc, Arc};
+
 use objc2::rc::Retained;
-use objc2::{define_class, MainThreadMarker, MainThreadOnly};
+use objc2::{define_class, DefinedClass, MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{NSApplication, NSApplicationDelegate};
 use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol};
+
+use crate::event::AppEvent;
+use crate::window::MacWindow;
+
+type SetupFn = Box<dyn FnOnce(Arc<MacWindow>, mpsc::Receiver<AppEvent>) + 'static>;
+
+pub(crate) struct DelegateIvars {
+    setup: RefCell<Option<SetupFn>>,
+}
 
 define_class! {
     #[unsafe(super(NSObject))]
     #[thread_kind = MainThreadOnly]
     #[name = "JuniqAppDelegate"]
+    #[ivars = DelegateIvars]
     pub(crate) struct AppDelegate;
 
     unsafe impl NSObjectProtocol for AppDelegate {}
@@ -14,8 +27,26 @@ define_class! {
     unsafe impl NSApplicationDelegate for AppDelegate {
         #[unsafe(method(applicationDidFinishLaunching:))]
         fn did_finish_launching(&self, _notification: &NSNotification) {
-            let app = NSApplication::sharedApplication(MainThreadMarker::new().unwrap());
+            let mtm = MainThreadMarker::new().unwrap();
+            let app = NSApplication::sharedApplication(mtm);
             app.activate();
+
+            // 윈도우 생성을 다음 런루프 틱으로 지연.
+            // didFinishLaunching 이후 런루프가 돌면서 IMK 입력 서버
+            // mach port 연결이 완료된 상태에서 윈도우가 생성됨.
+            let setup = self.ivars().setup.borrow_mut().take();
+            if let Some(setup) = setup {
+                dispatch_async_main(move || {
+                    let mtm = MainThreadMarker::new().unwrap();
+                    let mac_window = MacWindow::new(mtm, "juniqterm", 800.0, 600.0);
+                    let (tx, rx) = mpsc::channel();
+                    mac_window.set_sender(tx);
+                    mac_window.show();
+
+                    let mac_window = Arc::new(mac_window);
+                    setup(mac_window, rx);
+                });
+            }
         }
 
         #[unsafe(method(applicationShouldTerminateAfterLastWindowClosed:))]
@@ -26,8 +57,38 @@ define_class! {
 }
 
 impl AppDelegate {
-    pub(crate) fn new(mtm: MainThreadMarker) -> Retained<Self> {
-        let this = mtm.alloc::<Self>().set_ivars(());
+    pub(crate) fn new(mtm: MainThreadMarker, setup: SetupFn) -> Retained<Self> {
+        let this = mtm.alloc::<Self>().set_ivars(DelegateIvars {
+            setup: RefCell::new(Some(setup)),
+        });
         unsafe { objc2::msg_send![super(this), init] }
+    }
+}
+
+use std::ffi::c_void;
+
+extern "C" {
+    static _dispatch_main_q: c_void;
+    fn dispatch_async_f(
+        queue: *const c_void,
+        context: *mut c_void,
+        work: extern "C" fn(*mut c_void),
+    );
+}
+
+extern "C" fn dispatch_trampoline(ctx: *mut c_void) {
+    let closure: Box<Box<dyn FnOnce()>> = unsafe { Box::from_raw(ctx as *mut _) };
+    closure();
+}
+
+fn dispatch_async_main<F: FnOnce() + 'static>(f: F) {
+    let boxed: Box<Box<dyn FnOnce()>> = Box::new(Box::new(f));
+    let ptr = Box::into_raw(boxed) as *mut c_void;
+    unsafe {
+        dispatch_async_f(
+            &_dispatch_main_q as *const _ as *const c_void,
+            ptr,
+            dispatch_trampoline,
+        );
     }
 }

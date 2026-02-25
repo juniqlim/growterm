@@ -7,7 +7,6 @@ use juniqterm_grid::Grid;
 use juniqterm_macos::{AppEvent, MacWindow, Modifiers};
 use juniqterm_vt_parser::VtParser;
 
-use crate::jamo_compose::{is_single_jamo, JamoBuffer};
 use crate::zoom;
 
 struct TerminalState {
@@ -39,7 +38,6 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
     };
 
     let mut preedit = String::new();
-    let mut jamo_buf = JamoBuffer::new();
     let grid_dump_path = std::env::var("JUNIQTERM_GRID_DUMP").ok();
     let test_input = std::env::var("JUNIQTERM_TEST_INPUT").ok();
     let mut test_input_sent = false;
@@ -48,20 +46,8 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
         match event {
             AppEvent::TextCommit(text) => {
                 preedit.clear();
-                if jamo_buf.is_active() || is_single_jamo(&text).is_some() {
-                    if let Some(composed) = jamo_buf.push(&text) {
-                        let composed: String = composed;
-                        let _ = pty_writer.write_all(composed.as_bytes());
-                        let _ = pty_writer.flush();
-                    }
-                } else {
-                    if let Some(flushed) = jamo_buf.flush() {
-                        let flushed: String = flushed;
-                        let _ = pty_writer.write_all(flushed.as_bytes());
-                    }
-                    let _ = pty_writer.write_all(text.as_bytes());
-                    let _ = pty_writer.flush();
-                }
+                let _ = pty_writer.write_all(text.as_bytes());
+                let _ = pty_writer.flush();
             }
             AppEvent::Preedit(text) => {
                 preedit = text;
