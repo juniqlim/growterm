@@ -7,8 +7,10 @@ edition = "2021"
 juniqterm-types = { path = "../juniqterm-types" }
 juniqterm-vt-parser = { path = "../juniqterm-vt-parser" }
 juniqterm-grid = { path = "../juniqterm-grid" }
+juniqterm-pty = { path = "../juniqterm-pty" }
 juniqterm-render-cmd = { path = "../juniqterm-render-cmd" }
 juniqterm-gpu-draw = { path = "../juniqterm-gpu-draw" }
 wgpu = "24"
 bytemuck = { version = "1", features = ["derive"] }
 pollster = "0.4"
+serde_json = "1"

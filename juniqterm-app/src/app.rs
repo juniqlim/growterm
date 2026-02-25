@@ -38,6 +38,10 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
     };
 
     let mut preedit = String::new();
+    let grid_dump_path = std::env::var("JUNIQTERM_GRID_DUMP").ok();
+    let mut grid_dumped = false;
+    let test_input = std::env::var("JUNIQTERM_TEST_INPUT").ok();
+    let mut test_input_sent = false;
 
     for event in rx {
         match event {
@@ -119,8 +123,38 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                 render(&mut drawer, &terminal, &preedit);
             }
             AppEvent::RedrawRequested => {
-                dirty.swap(false, Ordering::Relaxed);
+                let was_dirty = dirty.swap(false, Ordering::Relaxed);
                 render(&mut drawer, &terminal, &preedit);
+                if was_dirty && !grid_dumped {
+                    if let Some(ref path) = grid_dump_path {
+                        let state = terminal.lock().unwrap();
+                        let has_content = state.grid.cells().iter().any(|row| {
+                            row.iter().any(|c| c.character != '\0' && c.character != ' ')
+                        });
+                        if has_content {
+                            let (crow, ccol) = state.grid.cursor_pos();
+                            let mut dump = format!("cursor:{crow},{ccol}\ngrid:\n");
+                            for row in state.grid.cells() {
+                                let text: String = row.iter().map(|c| c.character).collect();
+                                dump.push_str(text.trim_end_matches(|c: char| c == '\0' || c == ' '));
+                                dump.push('\n');
+                            }
+                            drop(state);
+                            // If test_input is set and not yet sent, send it and wait for next dirty render.
+                            if let Some(ref input) = test_input {
+                                if !test_input_sent {
+                                    let _ = pty_writer.write_all(input.as_bytes());
+                                    let _ = pty_writer.flush();
+                                    test_input_sent = true;
+                                    // Don't dump yet — wait for the command output.
+                                    continue;
+                                }
+                            }
+                            let _ = std::fs::write(path, &dump);
+                            grid_dumped = true;
+                        }
+                    }
+                }
             }
             AppEvent::CloseRequested => {
                 std::process::exit(0);
