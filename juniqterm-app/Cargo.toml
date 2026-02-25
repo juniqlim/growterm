@@ -3,6 +3,10 @@ name = "juniqterm-app"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "juniqterm"
+path = "src/main.rs"
+
 [dependencies]
 juniqterm-types = { path = "../juniqterm-types" }
 juniqterm-gpu-draw = { path = "../juniqterm-gpu-draw" }
