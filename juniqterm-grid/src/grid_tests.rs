@@ -1,4 +1,4 @@
-use crate::Grid;
+use crate::{Grid, MAX_SCROLLBACK};
 use juniqterm_types::{Cell, CellFlags, Color, Rgb, TerminalCommand};
 
 // === Step 1: Grid::new + cells() ===
@@ -633,4 +633,131 @@ fn reset_individual_preserves_other_flags() {
     let flags = grid.cells()[0][0].flags;
     assert!(flags.contains(CellFlags::BOLD));
     assert!(!flags.contains(CellFlags::INVERSE));
+}
+
+// === Scrollback buffer ===
+
+#[test]
+fn scroll_up_saves_row_to_scrollback() {
+    let mut grid = Grid::new(5, 2);
+    for c in "AAAAA".chars() {
+        grid.apply(&TerminalCommand::Print(c));
+    }
+    grid.apply(&TerminalCommand::CarriageReturn);
+    grid.apply(&TerminalCommand::Newline);
+    for c in "BBBBB".chars() {
+        grid.apply(&TerminalCommand::Print(c));
+    }
+    // Newline at bottom triggers scroll_up
+    grid.apply(&TerminalCommand::CarriageReturn);
+    grid.apply(&TerminalCommand::Newline);
+    // "AAAAA" should be in scrollback
+    assert_eq!(grid.scrollback_len(), 1);
+    assert_eq!(grid.cells()[0][0].character, 'B');
+}
+
+#[test]
+fn scrollback_max_size_trims_oldest() {
+    let mut grid = Grid::new(3, 1);
+    // Each newline at bottom scrolls up, pushing the current row to scrollback
+    for i in 0..(MAX_SCROLLBACK + 100) {
+        let c = if i % 2 == 0 { 'A' } else { 'B' };
+        grid.apply(&TerminalCommand::CarriageReturn);
+        grid.apply(&TerminalCommand::Print(c));
+        grid.apply(&TerminalCommand::Newline);
+    }
+    assert!(grid.scrollback_len() <= MAX_SCROLLBACK);
+}
+
+#[test]
+fn visible_cells_at_offset_zero_returns_current() {
+    let mut grid = Grid::new(5, 2);
+    grid.apply(&TerminalCommand::Print('A'));
+    let vis = grid.visible_cells();
+    assert_eq!(vis.len(), 2);
+    assert_eq!(vis[0][0].character, 'A');
+}
+
+#[test]
+fn visible_cells_with_scroll_offset_shows_scrollback() {
+    let mut grid = Grid::new(5, 2);
+    // Row "AAAAA"
+    for c in "AAAAA".chars() {
+        grid.apply(&TerminalCommand::Print(c));
+    }
+    grid.apply(&TerminalCommand::CarriageReturn);
+    grid.apply(&TerminalCommand::Newline);
+    // Row "BBBBB"
+    for c in "BBBBB".chars() {
+        grid.apply(&TerminalCommand::Print(c));
+    }
+    grid.apply(&TerminalCommand::CarriageReturn);
+    grid.apply(&TerminalCommand::Newline);
+    // Row "CCCCC" now on screen row 0, "AAAAA" in scrollback
+    for c in "CCCCC".chars() {
+        grid.apply(&TerminalCommand::Print(c));
+    }
+    // scrollback has "AAAAA", cells has ["BBBBB", "CCCCC"]
+    assert_eq!(grid.scroll_offset(), 0);
+    grid.scroll_up_view(1);
+    assert_eq!(grid.scroll_offset(), 1);
+    let vis = grid.visible_cells();
+    assert_eq!(vis.len(), 2);
+    // Should see "AAAAA" and "BBBBB"
+    assert_eq!(vis[0][0].character, 'A');
+    assert_eq!(vis[1][0].character, 'B');
+}
+
+#[test]
+fn scroll_down_view_decreases_offset() {
+    let mut grid = Grid::new(5, 2);
+    for c in "AAAAA".chars() {
+        grid.apply(&TerminalCommand::Print(c));
+    }
+    grid.apply(&TerminalCommand::CarriageReturn);
+    grid.apply(&TerminalCommand::Newline);
+    for c in "BBBBB".chars() {
+        grid.apply(&TerminalCommand::Print(c));
+    }
+    grid.apply(&TerminalCommand::CarriageReturn);
+    grid.apply(&TerminalCommand::Newline);
+    grid.scroll_up_view(1);
+    grid.scroll_down_view(1);
+    assert_eq!(grid.scroll_offset(), 0);
+}
+
+#[test]
+fn reset_scroll_sets_offset_to_zero() {
+    let mut grid = Grid::new(5, 2);
+    for c in "AAAAA".chars() {
+        grid.apply(&TerminalCommand::Print(c));
+    }
+    grid.apply(&TerminalCommand::CarriageReturn);
+    grid.apply(&TerminalCommand::Newline);
+    for c in "BBBBB".chars() {
+        grid.apply(&TerminalCommand::Print(c));
+    }
+    grid.apply(&TerminalCommand::CarriageReturn);
+    grid.apply(&TerminalCommand::Newline);
+    grid.scroll_up_view(1);
+    grid.reset_scroll();
+    assert_eq!(grid.scroll_offset(), 0);
+}
+
+#[test]
+fn scroll_up_view_clamps_to_scrollback_len() {
+    let mut grid = Grid::new(5, 2);
+    for c in "AAAAA".chars() {
+        grid.apply(&TerminalCommand::Print(c));
+    }
+    grid.apply(&TerminalCommand::CarriageReturn);
+    grid.apply(&TerminalCommand::Newline);
+    for c in "BBBBB".chars() {
+        grid.apply(&TerminalCommand::Print(c));
+    }
+    grid.apply(&TerminalCommand::CarriageReturn);
+    grid.apply(&TerminalCommand::Newline);
+    // Only 1 row in scrollback
+    grid.scroll_up_view(100);
+    assert_eq!(grid.scroll_offset(), 1);
 }

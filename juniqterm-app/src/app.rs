@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use winit::application::ApplicationHandler;
-use winit::event::{ElementState, Ime, MouseButton, WindowEvent};
+use winit::event::{ElementState, Ime, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
 use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowId};
@@ -77,6 +77,7 @@ impl App {
                         for cmd in &commands {
                             state.grid.apply(cmd);
                         }
+                        state.grid.reset_scroll();
                         drop(state);
                         dirty.store(true, Ordering::Relaxed);
                         let _ = proxy.send_event(());
@@ -106,8 +107,9 @@ impl App {
     fn render(&mut self) {
         if let (Some(drawer), Some(terminal)) = (&mut self.drawer, &self.terminal) {
             let state = terminal.lock().unwrap();
-            let cursor = state.grid.cursor_pos();
-            let preedit = if self.ime.preedit().is_empty() {
+            let scrolled = state.grid.scroll_offset() > 0;
+            let cursor = if scrolled { None } else { Some(state.grid.cursor_pos()) };
+            let preedit = if self.ime.preedit().is_empty() || scrolled {
                 None
             } else {
                 Some(self.ime.preedit())
@@ -118,10 +120,22 @@ impl App {
             } else {
                 None
             };
+            let scrollback_len = state.grid.scrollback_len();
+            let rows = state.grid.cells().len();
+            let scroll_offset = state.grid.scroll_offset();
+            let scrollbar = if scrollback_len > 0 {
+                let total = (scrollback_len + rows) as f32;
+                let thumb_height = rows as f32 / total;
+                let thumb_top = (scrollback_len - scroll_offset) as f32 / total;
+                Some((thumb_top, thumb_height))
+            } else {
+                None
+            };
+            let visible = state.grid.visible_cells();
             let commands =
-                juniqterm_render_cmd::generate(state.grid.cells(), Some(cursor), preedit, sel);
+                juniqterm_render_cmd::generate(&visible, cursor, preedit, sel);
             drop(state);
-            drawer.draw(&commands);
+            drawer.draw(&commands, scrollbar);
         }
     }
 }
@@ -237,6 +251,29 @@ impl ApplicationHandler<()> for App {
                         winit::keyboard::Key::Character(s) => Some(s.as_str()),
                         _ => None,
                     };
+                    let is_page_up = matches!(
+                        event.physical_key,
+                        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::PageUp)
+                    );
+                    let is_page_down = matches!(
+                        event.physical_key,
+                        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::PageDown)
+                    );
+                    if is_page_up || is_page_down {
+                        if let Some(terminal) = &self.terminal {
+                            let mut state = terminal.lock().unwrap();
+                            let rows = state.grid.cells().len();
+                            if is_page_up {
+                                state.grid.scroll_up_view(rows);
+                            } else {
+                                state.grid.scroll_down_view(rows);
+                            }
+                        }
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                        return;
+                    }
                     if is_v {
                         if let Ok(mut clipboard) = arboard::Clipboard::new() {
                             if let Ok(text) = clipboard.get_text() {
@@ -341,6 +378,30 @@ impl ApplicationHandler<()> for App {
                         self.cell_size.1,
                     );
                     self.selection.update(row, col);
+                    if let Some(window) = &self.window {
+                        window.request_redraw();
+                    }
+                }
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let lines = match delta {
+                    MouseScrollDelta::LineDelta(_, y) => {
+                        if y > 0.0 { 3i32 } else if y < 0.0 { -3 } else { 0 }
+                    }
+                    MouseScrollDelta::PixelDelta(pos) => {
+                        let cell_h = self.cell_size.1 as f64;
+                        if cell_h > 0.0 { (pos.y / cell_h).round() as i32 } else { 0 }
+                    }
+                };
+                if lines != 0 {
+                    if let Some(terminal) = &self.terminal {
+                        let mut state = terminal.lock().unwrap();
+                        if lines > 0 {
+                            state.grid.scroll_up_view(lines as usize);
+                        } else {
+                            state.grid.scroll_down_view((-lines) as usize);
+                        }
+                    }
                     if let Some(window) = &self.window {
                         window.request_redraw();
                     }

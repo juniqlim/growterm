@@ -1,5 +1,11 @@
 use std::collections::HashMap;
 
+use core_foundation::array::CFArray;
+use core_foundation::base::TCFType;
+use core_foundation::string::CFString;
+use core_text::font as ct_font;
+use core_text::font::CTFontRef;
+
 pub struct RasterizedGlyph {
     pub width: u32,
     pub height: u32,
@@ -11,6 +17,7 @@ pub struct RasterizedGlyph {
 pub struct GlyphAtlas {
     font: fontdue::Font,
     fallback_font: fontdue::Font,
+    system_font_cache: HashMap<char, fontdue::Font>,
     size: f32,
     cache: HashMap<char, RasterizedGlyph>,
     cell_width: f32,
@@ -47,6 +54,7 @@ impl GlyphAtlas {
         Self {
             font,
             fallback_font,
+            system_font_cache: HashMap::new(),
             size,
             cache: HashMap::new(),
             cell_width: metrics.advance_width.ceil(),
@@ -58,6 +66,7 @@ impl GlyphAtlas {
     pub fn set_size(&mut self, size: f32) {
         self.size = size;
         self.cache.clear();
+        self.system_font_cache.clear();
 
         let metrics = self.font.metrics('M', size);
         let line_metrics = self.font.horizontal_line_metrics(size);
@@ -76,17 +85,76 @@ impl GlyphAtlas {
         self.ascent
     }
 
-    fn pick_font(&self, c: char) -> &fontdue::Font {
-        if self.font.lookup_glyph_index(c) != 0 {
-            &self.font
-        } else {
-            &self.fallback_font
+    fn find_system_font(&mut self, c: char) -> bool {
+        if self.system_font_cache.contains_key(&c) {
+            return true;
         }
+
+        let base = ct_font::new_from_name("Helvetica", self.size as f64)
+            .expect("failed to create CT font");
+        let langs: CFArray<CFString> = CFArray::from_CFTypes(&[]);
+        let cascade = ct_font::cascade_list_for_languages(&base, &langs);
+
+        let mut utf16_buf = [0u16; 2];
+        let utf16 = c.encode_utf16(&mut utf16_buf);
+        let mut glyph_buf = [0u16; 2];
+
+        for i in 0..cascade.len() {
+            let descriptor = cascade.get(i).unwrap();
+            let candidate = ct_font::new_from_descriptor(&descriptor, self.size as f64);
+
+            let found = unsafe {
+                extern "C" {
+                    fn CTFontGetGlyphsForCharacters(
+                        font: CTFontRef,
+                        characters: *const u16,
+                        glyphs: *mut u16,
+                        count: isize,
+                    ) -> bool;
+                }
+                CTFontGetGlyphsForCharacters(
+                    candidate.as_concrete_TypeRef(),
+                    utf16.as_ptr(),
+                    glyph_buf.as_mut_ptr(),
+                    utf16.len() as isize,
+                )
+            };
+
+            if found && glyph_buf[0] != 0 {
+                if let Some(url) = candidate.url() {
+                    if let Some(path) = url.to_path() {
+                        if let Ok(data) = std::fs::read(&path) {
+                            let settings = fontdue::FontSettings {
+                                scale: self.size,
+                                ..Default::default()
+                            };
+                            if let Ok(font) = fontdue::Font::from_bytes(data, settings) {
+                                if font.lookup_glyph_index(c) != 0 {
+                                    self.system_font_cache.insert(c, font);
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        false
     }
 
     pub fn get_or_insert(&mut self, c: char) -> &RasterizedGlyph {
         if !self.cache.contains_key(&c) {
-            let font = self.pick_font(c);
+            let font_ref: *const fontdue::Font = if self.font.lookup_glyph_index(c) != 0 {
+                &self.font
+            } else if self.fallback_font.lookup_glyph_index(c) != 0 {
+                &self.fallback_font
+            } else if self.find_system_font(c) {
+                self.system_font_cache.get(&c).unwrap()
+            } else {
+                &self.font
+            };
+
+            let font = unsafe { &*font_ref };
             let (metrics, bitmap) = font.rasterize(c, self.size);
             self.cache.insert(c, RasterizedGlyph {
                 width: metrics.width as u32,

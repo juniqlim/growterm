@@ -1,6 +1,8 @@
 use juniqterm_types::{Cell, CellFlags, Color, TerminalCommand};
 use unicode_width::UnicodeWidthChar;
 
+const MAX_SCROLLBACK: usize = 10_000;
+
 pub struct Grid {
     cells: Vec<Vec<Cell>>,
     cols: usize,
@@ -10,6 +12,8 @@ pub struct Grid {
     current_fg: Color,
     current_bg: Color,
     current_flags: CellFlags,
+    scrollback: Vec<Vec<Cell>>,
+    scroll_offset: usize,
 }
 
 impl Grid {
@@ -25,6 +29,8 @@ impl Grid {
             current_fg: Color::Default,
             current_bg: Color::Default,
             current_flags: CellFlags::empty(),
+            scrollback: Vec::new(),
+            scroll_offset: 0,
         }
     }
 
@@ -179,8 +185,45 @@ impl Grid {
     }
 
     fn scroll_up(&mut self) {
-        self.cells.remove(0);
+        let row = self.cells.remove(0);
+        self.scrollback.push(row);
+        if self.scrollback.len() > MAX_SCROLLBACK {
+            self.scrollback.remove(0);
+        }
         self.cells.push(vec![Cell::default(); self.cols]);
+    }
+
+    pub fn scroll_up_view(&mut self, lines: usize) {
+        self.scroll_offset = (self.scroll_offset + lines).min(self.scrollback.len());
+    }
+
+    pub fn scroll_down_view(&mut self, lines: usize) {
+        self.scroll_offset = self.scroll_offset.saturating_sub(lines);
+    }
+
+    pub fn reset_scroll(&mut self) {
+        self.scroll_offset = 0;
+    }
+
+    pub fn scroll_offset(&self) -> usize {
+        self.scroll_offset
+    }
+
+    pub fn scrollback_len(&self) -> usize {
+        self.scrollback.len()
+    }
+
+    pub fn visible_cells(&self) -> Vec<Vec<Cell>> {
+        if self.scroll_offset == 0 {
+            return self.cells.clone();
+        }
+        let sb_len = self.scrollback.len();
+        let sb_start = sb_len.saturating_sub(self.scroll_offset);
+        let mut result: Vec<Vec<Cell>> = self.scrollback[sb_start..].to_vec();
+        let screen_rows_needed = self.rows - result.len().min(self.rows);
+        result.extend_from_slice(&self.cells[..screen_rows_needed]);
+        result.truncate(self.rows);
+        result
     }
 
     fn blank_cell(&self) -> Cell {

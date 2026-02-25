@@ -353,7 +353,7 @@ impl GpuDrawer {
         self.atlas.cell_size()
     }
 
-    pub fn draw(&mut self, commands: &[RenderCommand]) {
+    pub fn draw(&mut self, commands: &[RenderCommand], scrollbar: Option<(f32, f32)>) {
         let output = match self.surface.get_current_texture() {
             Ok(t) => t,
             Err(_) => return,
@@ -522,6 +522,18 @@ impl GpuDrawer {
             glyph_vertices.push(GlyphVertex { position: [gx + gw, gy], tex_coords: [region.u1, region.v0], color });
             glyph_vertices.push(GlyphVertex { position: [gx + gw, gy + gh], tex_coords: [region.u1, region.v1], color });
             glyph_vertices.push(GlyphVertex { position: [gx, gy + gh], tex_coords: [region.u0, region.v1], color });
+        }
+
+        // Scrollbar
+        if let Some((thumb_top_ratio, thumb_height_ratio)) = scrollbar {
+            let screen_w = self.surface_config.width as f32;
+            let screen_h = self.surface_config.height as f32;
+            let bar_w = 6.0_f32;
+            let x0 = screen_w - bar_w;
+            let y0 = thumb_top_ratio * screen_h;
+            let h = thumb_height_ratio * screen_h;
+            let color = [0.5, 0.5, 0.5];
+            push_rect(&mut bg_vertices, x0, y0, bar_w, h, color);
         }
 
         let bg_buffer = self
