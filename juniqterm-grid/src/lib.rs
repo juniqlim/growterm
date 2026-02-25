@@ -64,6 +64,12 @@ impl Grid {
             TerminalCommand::SetInverse => self.current_flags |= CellFlags::INVERSE,
             TerminalCommand::SetHidden => self.current_flags |= CellFlags::HIDDEN,
             TerminalCommand::SetStrikethrough => self.current_flags |= CellFlags::STRIKETHROUGH,
+            TerminalCommand::ResetBold => self.current_flags.remove(CellFlags::BOLD | CellFlags::DIM),
+            TerminalCommand::ResetItalic => self.current_flags.remove(CellFlags::ITALIC),
+            TerminalCommand::ResetUnderline => self.current_flags.remove(CellFlags::UNDERLINE),
+            TerminalCommand::ResetInverse => self.current_flags.remove(CellFlags::INVERSE),
+            TerminalCommand::ResetHidden => self.current_flags.remove(CellFlags::HIDDEN),
+            TerminalCommand::ResetStrikethrough => self.current_flags.remove(CellFlags::STRIKETHROUGH),
             TerminalCommand::ResetAttributes => {
                 self.current_fg = Color::Default;
                 self.current_bg = Color::Default;

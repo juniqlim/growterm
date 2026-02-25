@@ -29,6 +29,12 @@ impl Handler {
                 7 => self.commands.push(TerminalCommand::SetInverse),
                 8 => self.commands.push(TerminalCommand::SetHidden),
                 9 => self.commands.push(TerminalCommand::SetStrikethrough),
+                22 => self.commands.push(TerminalCommand::ResetBold),
+                23 => self.commands.push(TerminalCommand::ResetItalic),
+                24 => self.commands.push(TerminalCommand::ResetUnderline),
+                27 => self.commands.push(TerminalCommand::ResetInverse),
+                28 => self.commands.push(TerminalCommand::ResetHidden),
+                29 => self.commands.push(TerminalCommand::ResetStrikethrough),
                 // Standard foreground colors 30-37
                 30..=37 => {
                     self.commands.push(TerminalCommand::SetForeground(
@@ -339,6 +345,48 @@ mod tests {
         let mut parser = VtParser::new();
         let cmds = parser.parse(b"\x1b[9m");
         assert_eq!(cmds, vec![TerminalCommand::SetStrikethrough]);
+    }
+
+    #[test]
+    fn parse_sgr_reset_bold() {
+        let mut parser = VtParser::new();
+        let cmds = parser.parse(b"\x1b[22m");
+        assert_eq!(cmds, vec![TerminalCommand::ResetBold]);
+    }
+
+    #[test]
+    fn parse_sgr_reset_italic() {
+        let mut parser = VtParser::new();
+        let cmds = parser.parse(b"\x1b[23m");
+        assert_eq!(cmds, vec![TerminalCommand::ResetItalic]);
+    }
+
+    #[test]
+    fn parse_sgr_reset_underline() {
+        let mut parser = VtParser::new();
+        let cmds = parser.parse(b"\x1b[24m");
+        assert_eq!(cmds, vec![TerminalCommand::ResetUnderline]);
+    }
+
+    #[test]
+    fn parse_sgr_reset_inverse() {
+        let mut parser = VtParser::new();
+        let cmds = parser.parse(b"\x1b[27m");
+        assert_eq!(cmds, vec![TerminalCommand::ResetInverse]);
+    }
+
+    #[test]
+    fn parse_sgr_reset_hidden() {
+        let mut parser = VtParser::new();
+        let cmds = parser.parse(b"\x1b[28m");
+        assert_eq!(cmds, vec![TerminalCommand::ResetHidden]);
+    }
+
+    #[test]
+    fn parse_sgr_reset_strikethrough() {
+        let mut parser = VtParser::new();
+        let cmds = parser.parse(b"\x1b[29m");
+        assert_eq!(cmds, vec![TerminalCommand::ResetStrikethrough]);
     }
 
     #[test]

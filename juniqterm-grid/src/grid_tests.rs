@@ -590,3 +590,47 @@ fn cursor_pos_after_cursor_position() {
     grid.apply(&TerminalCommand::CursorPosition { row: 5, col: 10 });
     assert_eq!(grid.cursor_pos(), (4, 9));
 }
+
+// === SGR individual reset codes ===
+
+#[test]
+fn reset_inverse_clears_inverse_flag() {
+    let mut grid = Grid::new(80, 24);
+    grid.apply(&TerminalCommand::SetInverse);
+    grid.apply(&TerminalCommand::Print('A'));
+    grid.apply(&TerminalCommand::ResetInverse);
+    grid.apply(&TerminalCommand::Print('B'));
+
+    assert!(grid.cells()[0][0].flags.contains(CellFlags::INVERSE));
+    assert!(!grid.cells()[0][1].flags.contains(CellFlags::INVERSE));
+}
+
+#[test]
+fn reset_bold_clears_bold_and_dim() {
+    let mut grid = Grid::new(80, 24);
+    grid.apply(&TerminalCommand::SetBold);
+    grid.apply(&TerminalCommand::SetDim);
+    grid.apply(&TerminalCommand::Print('A'));
+    grid.apply(&TerminalCommand::ResetBold);
+    grid.apply(&TerminalCommand::Print('B'));
+
+    let a = grid.cells()[0][0].flags;
+    assert!(a.contains(CellFlags::BOLD));
+    assert!(a.contains(CellFlags::DIM));
+    let b = grid.cells()[0][1].flags;
+    assert!(!b.contains(CellFlags::BOLD));
+    assert!(!b.contains(CellFlags::DIM));
+}
+
+#[test]
+fn reset_individual_preserves_other_flags() {
+    let mut grid = Grid::new(80, 24);
+    grid.apply(&TerminalCommand::SetBold);
+    grid.apply(&TerminalCommand::SetInverse);
+    grid.apply(&TerminalCommand::ResetInverse);
+    grid.apply(&TerminalCommand::Print('X'));
+
+    let flags = grid.cells()[0][0].flags;
+    assert!(flags.contains(CellFlags::BOLD));
+    assert!(!flags.contains(CellFlags::INVERSE));
+}

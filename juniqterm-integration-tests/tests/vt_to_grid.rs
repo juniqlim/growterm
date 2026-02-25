@@ -76,3 +76,67 @@ fn cursor_movement_then_overwrite() {
     assert_eq!(grid.cells()[0][1].character, 'X');
     assert_eq!(grid.cells()[0][2].character, 'c');
 }
+
+// === Claude Code style: inverse on/off for status bar ===
+
+#[test]
+fn claude_code_inverse_status_bar() {
+    // Claude Code renders a status bar like:
+    //   ESC[7m (inverse on) " Status " ESC[27m (inverse off) " normal text"
+    // Before SGR 27 was implemented, inverse leaked into "normal text".
+    let input = b"\x1b[7m Status \x1b[27m normal";
+    let grid = parse_and_apply(input, 80, 24);
+
+    // " Status " (cols 0-7) should have INVERSE
+    for col in 0..8 {
+        assert!(
+            grid.cells()[0][col].flags.contains(juniqterm_types::CellFlags::INVERSE),
+            "col {} should be inverse", col,
+        );
+    }
+    // " normal" (cols 8-14) should NOT have INVERSE
+    for col in 8..15 {
+        assert!(
+            !grid.cells()[0][col].flags.contains(juniqterm_types::CellFlags::INVERSE),
+            "col {} should not be inverse", col,
+        );
+    }
+}
+
+#[test]
+fn claude_code_bold_inverse_toggle() {
+    // Claude Code uses bold+inverse for highlighted items, then resets individually:
+    //   ESC[1;7m "highlighted" ESC[27m "bold only" ESC[22m "plain"
+    let input = b"\x1b[1;7mHL\x1b[27mBO\x1b[22mPL";
+    let grid = parse_and_apply(input, 80, 24);
+
+    use juniqterm_types::CellFlags;
+
+    // "HL" (cols 0-1): bold + inverse
+    assert!(grid.cells()[0][0].flags.contains(CellFlags::BOLD | CellFlags::INVERSE));
+    assert!(grid.cells()[0][1].flags.contains(CellFlags::BOLD | CellFlags::INVERSE));
+
+    // "BO" (cols 2-3): bold only, no inverse
+    assert!(grid.cells()[0][2].flags.contains(CellFlags::BOLD));
+    assert!(!grid.cells()[0][2].flags.contains(CellFlags::INVERSE));
+    assert!(grid.cells()[0][3].flags.contains(CellFlags::BOLD));
+    assert!(!grid.cells()[0][3].flags.contains(CellFlags::INVERSE));
+
+    // "PL" (cols 4-5): no bold, no inverse
+    assert!(!grid.cells()[0][4].flags.contains(CellFlags::BOLD));
+    assert!(!grid.cells()[0][4].flags.contains(CellFlags::INVERSE));
+}
+
+#[test]
+fn claude_code_repeated_inverse_toggle() {
+    // Claude Code status line toggles inverse multiple times per line:
+    //   ESC[7m"A"ESC[27m"B"ESC[7m"C"ESC[27m"D"
+    let input = b"\x1b[7mA\x1b[27mB\x1b[7mC\x1b[27mD";
+    let grid = parse_and_apply(input, 80, 24);
+
+    use juniqterm_types::CellFlags;
+    assert!(grid.cells()[0][0].flags.contains(CellFlags::INVERSE));  // A
+    assert!(!grid.cells()[0][1].flags.contains(CellFlags::INVERSE)); // B
+    assert!(grid.cells()[0][2].flags.contains(CellFlags::INVERSE));  // C
+    assert!(!grid.cells()[0][3].flags.contains(CellFlags::INVERSE)); // D
+}
