@@ -715,6 +715,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "juniqterm-integration-tests"
+version = "0.1.0"
+dependencies = [
+ "juniqterm-grid",
+ "juniqterm-types",
+ "juniqterm-vt-parser",
+]
+
+[[package]]
 name = "juniqterm-pty"
 version = "0.1.0"
 dependencies = [

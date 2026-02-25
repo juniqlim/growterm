@@ -1,0 +1,9 @@
+[package]
+name = "juniqterm-integration-tests"
+version = "0.1.0"
+edition = "2021"
+
+[dev-dependencies]
+juniqterm-types = { path = "../juniqterm-types" }
+juniqterm-vt-parser = { path = "../juniqterm-vt-parser" }
+juniqterm-grid = { path = "../juniqterm-grid" }

@@ -161,6 +161,22 @@ mod tests {
         );
     }
 
+    // === winit 버그: 첫 한글 입력 시 자소 분리 ===
+
+    #[test]
+    fn first_korean_key_leaks_jamo_before_ime_enabled() {
+        // winit 버그: 첫 한글 입력 시 KeyboardInput이 Ime::Enabled보다 먼저 도착
+        // preedit이 비어있어서 자소가 PTY로 직접 전송됨
+        //
+        // 실제 이벤트 순서:
+        // 1) KeyboardInput("ㅇ") ← preedit="", ime_composing=false
+        // 2) Ime::Enabled
+        // 3) Ime::Preedit("ㅏ") ...
+        let result = handle_plain_char_input(Some("ㅇ"), false);
+        // 현재: 자소 "ㅇ"이 PTY로 전송됨 (버그)
+        assert_eq!(result, Some(Action::WritePty("ㅇ".as_bytes().to_vec())));
+    }
+
     // === 한글 입력 전체 흐름 시뮬레이션 ===
 
     #[test]
