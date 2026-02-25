@@ -15,6 +15,7 @@ pub struct GlyphAtlas {
     cache: HashMap<char, RasterizedGlyph>,
     cell_width: f32,
     cell_height: f32,
+    ascent: f32,
 }
 
 impl GlyphAtlas {
@@ -38,9 +39,9 @@ impl GlyphAtlas {
 
         let metrics = font.metrics('M', size);
         let line_metrics = font.horizontal_line_metrics(size);
-        let cell_height = match line_metrics {
-            Some(lm) => lm.new_line_size,
-            None => metrics.height as f32,
+        let (cell_height, ascent) = match line_metrics {
+            Some(lm) => (lm.new_line_size, lm.ascent),
+            None => (metrics.height as f32, metrics.height as f32 * 0.8),
         };
 
         Self {
@@ -48,8 +49,9 @@ impl GlyphAtlas {
             fallback_font,
             size,
             cache: HashMap::new(),
-            cell_width: metrics.advance_width,
-            cell_height,
+            cell_width: metrics.advance_width.ceil(),
+            cell_height: cell_height.ceil(),
+            ascent,
         }
     }
 
@@ -59,15 +61,19 @@ impl GlyphAtlas {
 
         let metrics = self.font.metrics('M', size);
         let line_metrics = self.font.horizontal_line_metrics(size);
-        self.cell_height = match line_metrics {
-            Some(lm) => lm.new_line_size,
-            None => metrics.height as f32,
-        };
-        self.cell_width = metrics.advance_width;
+        match line_metrics {
+            Some(lm) => { self.cell_height = lm.new_line_size.ceil(); self.ascent = lm.ascent; }
+            None => { self.cell_height = (metrics.height as f32).ceil(); self.ascent = metrics.height as f32 * 0.8; }
+        }
+        self.cell_width = metrics.advance_width.ceil();
     }
 
     pub fn cell_size(&self) -> (f32, f32) {
         (self.cell_width, self.cell_height)
+    }
+
+    pub fn ascent(&self) -> f32 {
+        self.ascent
     }
 
     fn pick_font(&self, c: char) -> &fontdue::Font {

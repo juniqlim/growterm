@@ -167,8 +167,8 @@ impl GpuDrawer {
 
         let glyph_texture_view = glyph_texture.create_view(&Default::default());
         let glyph_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
 
@@ -373,7 +373,6 @@ impl GpuDrawer {
             let w = if cmd.flags.contains(CellFlags::WIDE_CHAR) { cell_w * 2.0 } else { cell_w };
             let color = rgb_to_f32(cmd.bg);
 
-            // Two triangles for the cell background
             bg_vertices.push(BgVertex { position: [x, y], color });
             bg_vertices.push(BgVertex { position: [x + w, y], color });
             bg_vertices.push(BgVertex { position: [x, y + cell_h], color });

@@ -865,11 +865,14 @@ dependencies = [
 name = "juniqterm-integration-tests"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "juniqterm-gpu-draw",
  "juniqterm-grid",
  "juniqterm-render-cmd",
  "juniqterm-types",
  "juniqterm-vt-parser",
+ "pollster",
+ "wgpu",
 ]
 
 [[package]]
