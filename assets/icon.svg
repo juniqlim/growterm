@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Background gradient - dark terminal feel -->
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a1a2e"/>
+      <stop offset="100%" style="stop-color:#16213e"/>
+    </linearGradient>
+    <!-- Leaf gradient -->
+    <linearGradient id="leaf1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#2ecc71"/>
+      <stop offset="100%" style="stop-color:#27ae60"/>
+    </linearGradient>
+    <linearGradient id="leaf2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#55efc4"/>
+      <stop offset="100%" style="stop-color:#00b894"/>
+    </linearGradient>
+    <linearGradient id="leaf3" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#a8e6cf"/>
+      <stop offset="100%" style="stop-color:#3dc1a0"/>
+    </linearGradient>
+    <!-- Stem gradient -->
+    <linearGradient id="stem" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" style="stop-color:#27ae60"/>
+      <stop offset="100%" style="stop-color:#55efc4"/>
+    </linearGradient>
+    <!-- Cursor glow -->
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="leafGlow">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Rounded square background with macOS-standard padding -->
+  <rect x="40" y="40" width="432" height="432" rx="86" ry="86" fill="url(#bg)"/>
+
+  <!-- Scale inner content to fit smaller background -->
+  <g transform="translate(40,40) scale(0.8438)">
+  <!-- Subtle terminal window top bar -->
+  <circle cx="76" cy="68" r="10" fill="#e74c3c" opacity="0.7"/>
+  <circle cx="112" cy="68" r="10" fill="#f39c12" opacity="0.7"/>
+  <circle cx="148" cy="68" r="10" fill="#2ecc71" opacity="0.7"/>
+
+  <!-- Terminal prompt text -->
+  <text x="76" y="380" font-family="monospace, 'Courier New'" font-size="36" fill="#636e72" opacity="0.5">$</text>
+
+  <!-- Blinking cursor block at bottom -->
+  <rect x="120" y="348" width="24" height="42" rx="3" fill="#2ecc71" opacity="0.9" filter="url(#glow)"/>
+
+  <!-- Main vine/stem - organic beanstalk curve growing from cursor -->
+  <path d="M132,348
+           C132,320 128,300 138,270
+           C148,240 120,220 135,190
+           C150,160 130,145 145,120
+           C155,100 148,95 155,85"
+        stroke="url(#stem)" stroke-width="8" fill="none" stroke-linecap="round"
+        filter="url(#leafGlow)"/>
+
+  <!-- Small tendril branch left -->
+  <path d="M135,270 C120,255 105,258 95,248"
+        stroke="#27ae60" stroke-width="5" fill="none" stroke-linecap="round"/>
+
+  <!-- Small tendril branch right -->
+  <path d="M135,190 C155,178 168,182 178,172"
+        stroke="#2ecc71" stroke-width="5" fill="none" stroke-linecap="round"/>
+
+  <!-- Leaf 1 - bottom left, larger -->
+  <path d="M95,248 C65,230 55,200 80,195 C105,190 100,230 95,248Z"
+        fill="url(#leaf1)" filter="url(#leafGlow)"/>
+  <!-- Leaf vein -->
+  <path d="M95,248 C85,232 78,215 82,202" stroke="#1a8c4e" stroke-width="1.5" fill="none" opacity="0.5"/>
+
+  <!-- Leaf 2 - middle right -->
+  <path d="M178,172 C210,155 225,125 200,118 C175,112 172,148 178,172Z"
+        fill="url(#leaf2)" filter="url(#leafGlow)"/>
+  <!-- Leaf vein -->
+  <path d="M178,172 C192,155 205,140 202,127" stroke="#0a8c6a" stroke-width="1.5" fill="none" opacity="0.5"/>
+
+  <!-- Leaf 3 - top left -->
+  <path d="M145,120 C115,105 95,80 118,72 C140,65 142,100 145,120Z"
+        fill="url(#leaf3)" filter="url(#leafGlow)"/>
+  <path d="M145,120 C130,105 115,90 118,78" stroke="#2a9c7a" stroke-width="1.5" fill="none" opacity="0.5"/>
+
+  <!-- Top small unfurling leaf - the newest growth -->
+  <path d="M155,85 C148,72 155,58 165,62 C172,65 162,78 155,85Z"
+        fill="#a8e6cf" filter="url(#leafGlow)"/>
+
+  <!-- Tiny spiral tendril at top -->
+  <path d="M158,68 C163,58 172,55 175,60 C178,65 170,62 168,58"
+        stroke="#55efc4" stroke-width="2.5" fill="none" stroke-linecap="round" opacity="0.8"/>
+
+  <!-- Small dots like code particles floating -->
+  <circle cx="200" cy="260" r="3" fill="#2ecc71" opacity="0.3"/>
+  <circle cx="90" cy="160" r="2.5" fill="#55efc4" opacity="0.25"/>
+  <circle cx="180" cy="100" r="2" fill="#a8e6cf" opacity="0.3"/>
+  <circle cx="230" cy="200" r="2" fill="#2ecc71" opacity="0.2"/>
+
+  <!-- Prompt line decoration -->
+  <text x="76" y="430" font-family="monospace, 'Courier New'" font-size="28" fill="#2ecc71" opacity="0.3">growTerm</text>
+  </g>
+</svg>

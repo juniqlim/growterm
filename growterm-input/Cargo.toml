@@ -1,0 +1,7 @@
+[package]
+name = "growterm-input"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+growterm-types = { path = "../growterm-types" }

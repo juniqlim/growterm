@@ -1,4 +1,4 @@
-# juniqterm
+# growterm
 
 [English](README.md)
 
@@ -49,7 +49,7 @@ Rust로 만든 GPU 가속 터미널 에뮬레이터. macOS 지원.
 
 ```bash
 cargo build --release
-cargo run -p juniqterm-app
+cargo run -p growterm-app
 ```
 
 ## 테스트

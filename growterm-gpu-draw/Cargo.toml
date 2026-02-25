@@ -1,0 +1,29 @@
+[package]
+name = "growterm-gpu-draw"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+growterm-types = { path = "../growterm-types" }
+wgpu = "24"
+raw-window-handle = "0.6"
+fontdue = "0.9"
+bytemuck = { version = "1", features = ["derive"] }
+pollster = "0.4"
+core-text = "20"
+core-foundation = "0.9"
+
+[[example]]
+name = "hardcoded_grid"
+
+[[example]]
+name = "integration_render_cmd"
+
+[[example]]
+name = "integration_vt_parser"
+
+[dev-dependencies]
+winit = "0.30"
+growterm-render-cmd = { path = "../growterm-render-cmd" }
+growterm-vt-parser = { path = "../growterm-vt-parser" }
+growterm-grid = { path = "../growterm-grid" }

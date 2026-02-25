@@ -1,0 +1,16 @@
+[package]
+name = "growterm-integration-tests"
+version = "0.1.0"
+edition = "2021"
+
+[dev-dependencies]
+growterm-types = { path = "../growterm-types" }
+growterm-vt-parser = { path = "../growterm-vt-parser" }
+growterm-grid = { path = "../growterm-grid" }
+growterm-pty = { path = "../growterm-pty" }
+growterm-render-cmd = { path = "../growterm-render-cmd" }
+growterm-gpu-draw = { path = "../growterm-gpu-draw" }
+wgpu = "24"
+bytemuck = { version = "1", features = ["derive"] }
+pollster = "0.4"
+serde_json = "1"

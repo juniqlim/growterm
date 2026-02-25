@@ -1,36 +1,36 @@
-# juniqterm 구현 계획
+# growterm 구현 계획
 
 ## Context
 
 기존 터미널 오픈소스 프로젝트는 기여 진입장벽이 높다. 모듈 간 결합이 강해서 한 부분을 고치려면 전체를 알아야 하고, 테스트가 부족해서 변경이 안전한지 확인할 수 없다.
 
-juniqterm은 **"내 변경이 안전한지 테스트로 직접 확인할 수 있는 터미널"**을 목표로 한다. 모듈 간 계약이 테스트로 명세되어 있어서, 기여자가 자기 모듈 테스트만 돌려도 나머지에 영향 없다는 확신을 가질 수 있다.
+growterm은 **"내 변경이 안전한지 테스트로 직접 확인할 수 있는 터미널"**을 목표로 한다. 모듈 간 계약이 테스트로 명세되어 있어서, 기여자가 자기 모듈 테스트만 돌려도 나머지에 영향 없다는 확신을 가질 수 있다.
 
 - 언어: **Rust** (사용자가 wgpu 경험 있음, `~/j/GPUSortedMap`)
 - 플랫폼: macOS 우선 (모듈화로 나중에 교체 가능)
-- 위치: `~/j/juniqterm`
+- 위치: `~/j/growterm`
 
 ## 프로젝트 구조
 
 ```
-~/j/juniqterm/
+~/j/growterm/
   Cargo.toml              # workspace
   README.md
   crates/
-    juniqterm-types/       # 모듈 간 계약 (공유 타입)
-    juniqterm-gpu-draw/    # GPU 드로우 (바보 렌더러)
-    juniqterm-render-cmd/  # Grid → RenderCommand 변환
-    juniqterm-vt-parser/   # bytes → TerminalCommand
-    juniqterm-grid/        # TerminalCommand → Grid 상태
-    juniqterm-pty/         # 셸 프로세스 통신
-    juniqterm-input/       # KeyEvent → bytes
-    juniqterm-app/         # 모든 모듈을 연결하는 바이너리
+    growterm-types/       # 모듈 간 계약 (공유 타입)
+    growterm-gpu-draw/    # GPU 드로우 (바보 렌더러)
+    growterm-render-cmd/  # Grid → RenderCommand 변환
+    growterm-vt-parser/   # bytes → TerminalCommand
+    growterm-grid/        # TerminalCommand → Grid 상태
+    growterm-pty/         # 셸 프로세스 통신
+    growterm-input/       # KeyEvent → bytes
+    growterm-app/         # 모든 모듈을 연결하는 바이너리
 ```
 
-**의존성 규칙: 모듈은 서로 의존하지 않는다. 오직 `juniqterm-types`만 공유한다.**
+**의존성 규칙: 모듈은 서로 의존하지 않는다. 오직 `growterm-types`만 공유한다.**
 
 ```
-juniqterm-types  ← 모든 모듈이 의존
+growterm-types  ← 모든 모듈이 의존
     ↑
     ├── gpu-draw      (+ wgpu, winit, fontdue)
     ├── render-cmd    (외부 의존성 없음)
@@ -52,7 +52,7 @@ juniqterm-types  ← 모든 모듈이 의존
 
 ### Phase 0: 프로젝트 셋업
 - Cargo workspace 생성
-- `juniqterm-types` 크레이트: 모든 계약 타입 정의
+- `growterm-types` 크레이트: 모든 계약 타입 정의
   - `RenderCommand` (GPU Draw 입력)
   - `Cell`, `Grid` 인터페이스 (그리드 상태)
   - `TerminalCommand` (VT 파서 출력)
@@ -135,5 +135,5 @@ struct KeyEvent { key: Key, modifiers: Modifiers }
 - Phase 0~6: 각 크레이트에서 `cargo test` → 모듈 단독 검증
 - Phase 1: `cargo run --example hardcoded_grid` → 시각 확인
 - Phase 5: 통합 테스트 (`tests/` 디렉토리, 단위 테스트와 분리)
-- Phase 7: `cargo run -p juniqterm-app` → 실제 셸 동작 확인
+- Phase 7: `cargo run -p growterm-app` → 실제 셸 동작 확인
 - 전체: `cargo test --workspace` → 모든 모듈 한번에 검증

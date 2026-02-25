@@ -1,4 +1,4 @@
-# juniqterm
+# growterm
 
 [한국어](README.ko.md)
 
@@ -49,7 +49,7 @@ Key Input → Input Encoding → PTY
 
 ```bash
 cargo build --release
-cargo run -p juniqterm-app
+cargo run -p growterm-app
 ```
 
 ## Test

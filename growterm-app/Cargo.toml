@@ -1,0 +1,21 @@
+[package]
+name = "growterm-app"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "growterm"
+path = "src/main.rs"
+
+[dependencies]
+growterm-types = { path = "../growterm-types" }
+growterm-gpu-draw = { path = "../growterm-gpu-draw" }
+growterm-render-cmd = { path = "../growterm-render-cmd" }
+growterm-vt-parser = { path = "../growterm-vt-parser" }
+growterm-grid = { path = "../growterm-grid" }
+growterm-pty = { path = "../growterm-pty" }
+growterm-input = { path = "../growterm-input" }
+growterm-macos = { path = "../growterm-macos" }
+libc = "0.2"
+arboard = "3"
+unicode-width = "0.2.2"

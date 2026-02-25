@@ -1,0 +1,349 @@
+use std::cell::{Cell, RefCell};
+use std::sync::mpsc::Sender;
+
+use objc2::rc::Retained;
+use objc2::runtime::{AnyObject, Sel};
+use objc2::{define_class, msg_send, DefinedClass, MainThreadMarker, MainThreadOnly};
+use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSTextInputClient, NSView};
+use objc2_foundation::{
+    NSArray, NSAttributedString, NSAttributedStringKey, NSCopying, NSPoint, NSRange,
+    NSRangePointer, NSRect, NSString, NSUInteger,
+};
+
+use crate::event::{AppEvent, Modifiers};
+
+/// IME 상태 머신 (WezTerm 방식)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ImeState {
+    /// interpretKeyEvents 호출 전 초기 상태
+    None,
+    /// insertText: 또는 setMarkedText: 호출됨 (IME가 처리)
+    Acted,
+    /// doCommandBySelector: 호출됨 (IME가 패스, 앱이 처리)
+    Continue,
+}
+
+#[doc(hidden)]
+pub struct Ivars {
+    sender: RefCell<Option<Sender<AppEvent>>>,
+    ime_state: Cell<ImeState>,
+    marked_text: RefCell<String>,
+    current_event: RefCell<Option<Retained<NSEvent>>>,
+}
+
+define_class! {
+    #[unsafe(super(NSView))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "GrowTerminalView"]
+    #[ivars = Ivars]
+    pub struct TerminalView;
+
+    // --- NSView / NSResponder overrides ---
+
+    impl TerminalView {
+        #[unsafe(method(acceptsFirstResponder))]
+        fn accepts_first_responder(&self) -> bool {
+            true
+        }
+
+        #[unsafe(method(wantsUpdateLayer))]
+        fn wants_update_layer(&self) -> bool {
+            true
+        }
+
+        #[unsafe(method(isFlipped))]
+        fn is_flipped(&self) -> bool {
+            true
+        }
+
+        #[unsafe(method(updateLayer))]
+        fn update_layer(&self) {
+            self.send_event(AppEvent::RedrawRequested);
+        }
+
+        /// Cmd 키 조합 (Cmd+V, Cmd+=/- 등)을 메뉴 시스템보다 먼저 가로챔.
+        /// 이 메서드가 true를 반환하면 keyDown:이 호출되지 않으므로
+        /// Cmd 조합은 여기서 직접 KeyInput 이벤트로 전달한다.
+        #[unsafe(method(performKeyEquivalent:))]
+        fn perform_key_equivalent(&self, event: &NSEvent) -> objc2::runtime::Bool {
+            let flags = event.modifierFlags();
+            if flags.contains(NSEventModifierFlags::Command) {
+                // Cmd+Q는 메뉴(terminate:)로 처리
+                if event.keyCode() == crate::key_convert::keycode::ANSI_Q {
+                    return objc2::runtime::Bool::NO;
+                }
+                self.dispatch_key_event(event);
+                return objc2::runtime::Bool::YES;
+            }
+            objc2::runtime::Bool::NO
+        }
+
+        #[unsafe(method(keyDown:))]
+        fn key_down(&self, event: &NSEvent) {
+            self.ivars().ime_state.set(ImeState::None);
+            self.ivars().current_event.replace(Some(event.copy()));
+
+            // IME로 라우팅
+            let events = NSArray::from_retained_slice(&[event.copy()]);
+            self.interpretKeyEvents(&events);
+
+            let state = self.ivars().ime_state.get();
+            match state {
+                ImeState::Acted => {
+                    // IME가 처리함 (insertText 또는 setMarkedText 호출됨)
+                }
+                ImeState::Continue | ImeState::None => {
+                    // IME가 패스하거나 아무 콜백도 호출 안 함
+                    self.dispatch_key_event(event);
+                }
+            }
+
+            self.ivars().current_event.replace(None);
+        }
+
+        #[unsafe(method(flagsChanged:))]
+        fn flags_changed(&self, _event: &NSEvent) {
+            // modifier 변경은 별도로 처리하지 않음
+        }
+
+        #[unsafe(method(mouseDown:))]
+        fn mouse_down(&self, event: &NSEvent) {
+            let (x, y) = self.event_location_in_backing(event);
+            self.send_event(AppEvent::MouseDown(x, y));
+        }
+
+        #[unsafe(method(mouseDragged:))]
+        fn mouse_dragged(&self, event: &NSEvent) {
+            let (x, y) = self.event_location_in_backing(event);
+            self.send_event(AppEvent::MouseDragged(x, y));
+        }
+
+        #[unsafe(method(mouseUp:))]
+        fn mouse_up(&self, event: &NSEvent) {
+            let (x, y) = self.event_location_in_backing(event);
+            self.send_event(AppEvent::MouseUp(x, y));
+        }
+
+        #[unsafe(method(scrollWheel:))]
+        fn scroll_wheel(&self, event: &NSEvent) {
+            let delta_y = if event.hasPreciseScrollingDeltas() {
+                // 트랙패드: 픽셀 단위 → 그대로 전달 (app에서 누적)
+                event.scrollingDeltaY()
+            } else {
+                // 마우스 휠: line 단위 → 셀 높이를 곱해서 픽셀 단위로 변환
+                let scale = self.backing_scale_factor();
+                event.scrollingDeltaY() * 40.0 * scale
+            };
+            if delta_y != 0.0 {
+                self.send_event(AppEvent::ScrollWheel(delta_y));
+            }
+        }
+
+        #[unsafe(method(setFrameSize:))]
+        fn set_frame_size(&self, new_size: objc2_foundation::NSSize) {
+            let _: () = unsafe { msg_send![super(self), setFrameSize: new_size] };
+            if let Some(layer) = self.layer() {
+                layer.setNeedsDisplay();
+            }
+            let scale = self.backing_scale_factor();
+            let w = (new_size.width * scale) as u32;
+            let h = (new_size.height * scale) as u32;
+            if w > 0 && h > 0 {
+                self.send_event(AppEvent::Resize(w, h));
+            }
+        }
+
+        #[unsafe(method(viewDidChangeBackingProperties))]
+        fn view_did_change_backing_properties(&self) {
+            let _: () = unsafe { msg_send![super(self), viewDidChangeBackingProperties] };
+            if let Some(layer) = self.layer() {
+                layer.setContentsScale(self.backing_scale_factor());
+            }
+        }
+    }
+
+    // --- NSTextInputClient ---
+
+    unsafe impl NSTextInputClient for TerminalView {
+        #[unsafe(method(insertText:replacementRange:))]
+        fn insert_text(&self, string: &AnyObject, _replacement_range: NSRange) {
+            self.ivars().ime_state.set(ImeState::Acted);
+
+            let text = nsobj_to_string(string);
+            {
+                let mut marked = self.ivars().marked_text.borrow_mut();
+                if !marked.is_empty() {
+                    marked.clear();
+                    self.send_event(AppEvent::Preedit(String::new()));
+                }
+            }
+            self.send_event(AppEvent::TextCommit(text));
+        }
+
+        #[unsafe(method(doCommandBySelector:))]
+        fn do_command_by_selector(&self, _selector: Sel) {
+            self.ivars().ime_state.set(ImeState::Continue);
+        }
+
+        #[unsafe(method(setMarkedText:selectedRange:replacementRange:))]
+        fn set_marked_text(
+            &self,
+            string: &AnyObject,
+            _selected_range: NSRange,
+            _replacement_range: NSRange,
+        ) {
+            self.ivars().ime_state.set(ImeState::Acted);
+
+            let text = nsobj_to_string(string);
+            self.ivars().marked_text.replace(text.clone());
+            self.send_event(AppEvent::Preedit(text));
+        }
+
+        #[unsafe(method(unmarkText))]
+        fn unmark_text(&self) {
+            self.ivars().marked_text.replace(String::new());
+            self.send_event(AppEvent::Preedit(String::new()));
+        }
+
+        #[unsafe(method(hasMarkedText))]
+        fn has_marked_text(&self) -> bool {
+            !self.ivars().marked_text.borrow().is_empty()
+        }
+
+        #[unsafe(method(markedRange))]
+        fn marked_range(&self) -> NSRange {
+            let marked = self.ivars().marked_text.borrow();
+            if marked.is_empty() {
+                NSRange::new(NSUInteger::MAX, 0)
+            } else {
+                NSRange::new(0, marked.len())
+            }
+        }
+
+        #[unsafe(method(selectedRange))]
+        fn selected_range(&self) -> NSRange {
+            NSRange::new(NSUInteger::MAX, 0)
+        }
+
+        #[unsafe(method_id(attributedSubstringForProposedRange:actualRange:))]
+        fn attributed_substring(
+            &self,
+            _range: NSRange,
+            _actual_range: NSRangePointer,
+        ) -> Option<Retained<NSAttributedString>> {
+            None
+        }
+
+        #[unsafe(method(firstRectForCharacterRange:actualRange:))]
+        fn first_rect(
+            &self,
+            _range: NSRange,
+            _actual_range: NSRangePointer,
+        ) -> NSRect {
+            if let Some(window) = self.window() {
+                let frame = window.frame();
+                NSRect::new(
+                    NSPoint::new(frame.origin.x, frame.origin.y),
+                    objc2_foundation::NSSize::new(0.0, 0.0),
+                )
+            } else {
+                NSRect::ZERO
+            }
+        }
+
+        #[unsafe(method(characterIndexForPoint:))]
+        fn character_index_for_point(&self, _point: NSPoint) -> NSUInteger {
+            0
+        }
+
+        #[unsafe(method_id(validAttributesForMarkedText))]
+        fn valid_attributes(&self) -> Retained<NSArray<NSAttributedStringKey>> {
+            NSArray::new()
+        }
+    }
+}
+
+impl TerminalView {
+    pub fn new(mtm: MainThreadMarker) -> Retained<Self> {
+        let this = mtm.alloc::<Self>();
+        let this = this.set_ivars(Ivars {
+            sender: RefCell::new(None),
+            ime_state: Cell::new(ImeState::None),
+            marked_text: RefCell::new(String::new()),
+            current_event: RefCell::new(None),
+        });
+        let this: Retained<Self> = unsafe { msg_send![super(this), init] };
+        this.setWantsLayer(true);
+        if let Some(layer) = this.layer() {
+            layer.setContentsScale(this.backing_scale_factor());
+        }
+        this
+    }
+
+    pub(crate) fn set_sender(&self, sender: Sender<AppEvent>) {
+        self.ivars().sender.replace(Some(sender));
+    }
+
+    fn send_event(&self, event: AppEvent) {
+        if let Some(ref sender) = *self.ivars().sender.borrow() {
+            let _ = sender.send(event);
+        }
+    }
+
+    fn dispatch_key_event(&self, event: &NSEvent) {
+        let keycode = event.keyCode();
+        let flags = event.modifierFlags();
+        let characters = event
+            .charactersIgnoringModifiers()
+            .map(|s| s.to_string());
+        let modifiers = convert_modifier_flags(flags);
+        self.send_event(AppEvent::KeyInput {
+            keycode,
+            characters,
+            modifiers,
+        });
+    }
+
+    fn event_location_in_backing(&self, event: &NSEvent) -> (f64, f64) {
+        let loc = event.locationInWindow();
+        let local = self.convertPoint_fromView(loc, None);
+        let scale = self.backing_scale_factor();
+        // NSView is flipped (isFlipped returns true), so y is already top-down
+        (local.x * scale, local.y * scale)
+    }
+
+    fn backing_scale_factor(&self) -> f64 {
+        self.window()
+            .map(|w| w.backingScaleFactor())
+            .unwrap_or(2.0)
+    }
+}
+
+fn nsobj_to_string(obj: &AnyObject) -> String {
+    let class_name = obj.class().name().to_str().unwrap_or("");
+    if class_name.contains("AttributedString") {
+        let attr_str: &NSAttributedString =
+            unsafe { &*(obj as *const AnyObject as *const NSAttributedString) };
+        attr_str.string().to_string()
+    } else {
+        let ns_str: &NSString = unsafe { &*(obj as *const AnyObject as *const NSString) };
+        ns_str.to_string()
+    }
+}
+
+fn convert_modifier_flags(flags: NSEventModifierFlags) -> Modifiers {
+    let mut mods = Modifiers::empty();
+    if flags.contains(NSEventModifierFlags::Shift) {
+        mods |= Modifiers::SHIFT;
+    }
+    if flags.contains(NSEventModifierFlags::Control) {
+        mods |= Modifiers::CONTROL;
+    }
+    if flags.contains(NSEventModifierFlags::Option) {
+        mods |= Modifiers::ALT;
+    }
+    if flags.contains(NSEventModifierFlags::Command) {
+        mods |= Modifiers::SUPER;
+    }
+    mods
+}

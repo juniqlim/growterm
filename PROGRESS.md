@@ -1,7 +1,7 @@
-# juniqterm Progress
+# growterm Progress
 
 ## Phase 0: Project Setup — DONE
-- Cargo workspace + juniqterm-types
+- Cargo workspace + growterm-types
 - 계약 타입: Rgb, Color, CellFlags, Cell, RenderCommand, TerminalCommand, KeyEvent
 - 17 unit tests
 
@@ -75,7 +75,7 @@
 
 ## Phase 7: App — DONE
 - 모든 모듈 연결: KeyboardInput → PTY → VtParser → Grid → RenderCmd → GpuDrawer
-- key_convert: winit Key → juniqterm KeyEvent 변환 (20 unit tests)
+- key_convert: winit Key → growterm KeyEvent 변환 (20 unit tests)
 - App struct: ApplicationHandler<()> 구현
   - resumed(): 윈도우 → GpuDrawer → cell_size 기반 cols/rows → Grid → PTY spawn → IO thread
   - IO thread: read → parse → apply → dirty flag → proxy.send_event(())

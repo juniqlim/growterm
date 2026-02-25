@@ -1,4 +1,4 @@
-# juniqterm 검증 방법
+# growterm 검증 방법
 
 ## 테스트 실행
 
@@ -7,23 +7,23 @@
 cargo test --workspace
 
 # 개별 크레이트 테스트
-cargo test -p juniqterm-types
-cargo test -p juniqterm-gpu-draw
-cargo test -p juniqterm-render-cmd
-cargo test -p juniqterm-vt-parser
+cargo test -p growterm-types
+cargo test -p growterm-gpu-draw
+cargo test -p growterm-render-cmd
+cargo test -p growterm-vt-parser
 ```
 
 ## 시각 확인 (integration examples)
 
 ```bash
 # Phase 1+2: Cell → generate() → draw()
-cargo run --example integration_render_cmd -p juniqterm-gpu-draw
+cargo run --example integration_render_cmd -p growterm-gpu-draw
 
 # Phase 1+2+3: bytes → VtParser → Grid → generate() → draw()
-cargo run --example integration_vt_parser -p juniqterm-gpu-draw
+cargo run --example integration_vt_parser -p growterm-gpu-draw
 
 # Phase 1 단독: 하드코딩 그리드
-cargo run --example hardcoded_grid -p juniqterm-gpu-draw
+cargo run --example hardcoded_grid -p growterm-gpu-draw
 ```
 
 ## 스크린샷 자동 캡처 (Claude Code용)
