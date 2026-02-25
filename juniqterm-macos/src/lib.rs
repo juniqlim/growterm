@@ -61,7 +61,13 @@ fn ensure_bundle_identifier() {
     let link_path = macos_dir.join(exe_name.as_ref());
 
     if plist_path.exists() && link_path.exists() {
-        return;
+        // 바이너리가 갱신되었으면 복사본도 갱신
+        let src_modified = std::fs::metadata(&exe).and_then(|m| m.modified()).ok();
+        let dst_modified = std::fs::metadata(&link_path).and_then(|m| m.modified()).ok();
+        match (src_modified, dst_modified) {
+            (Some(src), Some(dst)) if src <= dst => return,
+            _ => {}
+        }
     }
 
     let _ = std::fs::create_dir_all(&macos_dir);

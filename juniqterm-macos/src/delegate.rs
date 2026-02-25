@@ -32,8 +32,8 @@ define_class! {
             app.activate();
 
             // 윈도우 생성을 다음 런루프 틱으로 지연.
-            // didFinishLaunching 이후 런루프가 돌면서 IMK 입력 서버
-            // mach port 연결이 완료된 상태에서 윈도우가 생성됨.
+            // didFinishLaunching 시점에는 IMK 입력 서버의 mach port 연결이
+            // 아직 완료되지 않아, 즉시 윈도우를 만들면 자소 분리가 발생함.
             let setup = self.ivars().setup.borrow_mut().take();
             if let Some(setup) = setup {
                 dispatch_async_main(move || {
@@ -53,15 +53,6 @@ define_class! {
         fn should_terminate_after_last_window_closed(&self, _app: &NSApplication) -> bool {
             true
         }
-    }
-}
-
-impl AppDelegate {
-    pub(crate) fn new(mtm: MainThreadMarker, setup: SetupFn) -> Retained<Self> {
-        let this = mtm.alloc::<Self>().set_ivars(DelegateIvars {
-            setup: RefCell::new(Some(setup)),
-        });
-        unsafe { objc2::msg_send![super(this), init] }
     }
 }
 
@@ -92,3 +83,13 @@ fn dispatch_async_main<F: FnOnce() + 'static>(f: F) {
         );
     }
 }
+
+impl AppDelegate {
+    pub(crate) fn new(mtm: MainThreadMarker, setup: SetupFn) -> Retained<Self> {
+        let this = mtm.alloc::<Self>().set_ivars(DelegateIvars {
+            setup: RefCell::new(Some(setup)),
+        });
+        unsafe { objc2::msg_send![super(this), init] }
+    }
+}
+
