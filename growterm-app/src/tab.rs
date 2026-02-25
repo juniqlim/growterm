@@ -115,6 +115,24 @@ impl TabManager {
         &mut self.tabs
     }
 
+    pub fn show_tab_bar(&self) -> bool {
+        self.tabs.len() > 1
+    }
+
+    /// Terminal rows adjusted for tab bar presence.
+    pub fn term_rows(&self, total_rows: u16) -> u16 {
+        if self.show_tab_bar() {
+            total_rows.saturating_sub(1).max(1)
+        } else {
+            total_rows
+        }
+    }
+
+    /// Y pixel offset for mouse events (tab bar height or 0).
+    pub fn mouse_y_offset(&self, cell_h: f32) -> f32 {
+        if self.show_tab_bar() { cell_h } else { 0.0 }
+    }
+
     pub fn tab_bar_info(&self) -> TabBarInfo {
         TabBarInfo {
             titles: self.tabs.iter().map(|t| t.title.clone()).collect(),

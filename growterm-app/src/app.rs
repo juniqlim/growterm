@@ -69,7 +69,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                         let (cw, ch) = drawer.cell_size();
                         let (w, h) = window.inner_size();
                         let (cols, rows) = zoom::calc_grid_size(w, h, cw, ch);
-                        let was_single = tabs.tab_count() == 1;
+                        let had_no_tab_bar = !tabs.show_tab_bar();
                         let term_rows = rows.saturating_sub(1).max(1);
                         match Tab::spawn(term_rows, cols, tab_counter, window.clone()) {
                             Ok(tab) => {
@@ -78,7 +78,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                                 sel.clear();
                                 preedit.clear();
                                 // Tab bar just appeared — shrink existing tabs by 1 row
-                                if was_single {
+                                if had_no_tab_bar && tabs.show_tab_bar() {
                                     for t in tabs.tabs_mut() {
                                         let mut st = t.terminal.lock().unwrap();
                                         st.grid.resize(cols, term_rows);
@@ -95,7 +95,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
 
                     // Cmd+W: close tab
                     if keycode == kc::ANSI_W {
-                        let had_multiple = tabs.tab_count() > 1;
+                        let had_tab_bar = tabs.show_tab_bar();
                         tabs.close_active();
                         if tabs.is_empty() {
                             std::process::exit(0);
@@ -103,7 +103,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                         sel.clear();
                         preedit.clear();
                         // Tab bar just disappeared — expand remaining tab by 1 row
-                        if had_multiple && tabs.tab_count() == 1 {
+                        if had_tab_bar && !tabs.show_tab_bar() {
                             let (cw, ch) = drawer.cell_size();
                             let (w, h) = window.inner_size();
                             let (cols, rows) = zoom::calc_grid_size(w, h, cw, ch);
@@ -201,7 +201,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                         let (cw, ch) = drawer.cell_size();
                         let (w, h) = window.inner_size();
                         let (cols, rows) = zoom::calc_grid_size(w, h, cw, ch);
-                        let term_rows = if tabs.tab_count() > 1 { rows.saturating_sub(1).max(1) } else { rows };
+                        let term_rows = tabs.term_rows(rows);
                         // Resize all tabs
                         for tab in tabs.tabs_mut() {
                             let mut state = tab.terminal.lock().unwrap();
@@ -229,21 +229,21 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
             }
             AppEvent::MouseDown(x, y) => {
                 let (cw, ch) = drawer.cell_size();
-                let (row, col) = selection::pixel_to_cell(x as f32, y as f32 - if tabs.tab_count() > 1 { ch } else { 0.0 }, cw, ch);
+                let (row, col) = selection::pixel_to_cell(x as f32, y as f32 - tabs.mouse_y_offset(ch), cw, ch);
                 sel.begin(row, col);
                 window.request_redraw();
             }
             AppEvent::MouseDragged(x, y) => {
                 if sel.active {
                     let (cw, ch) = drawer.cell_size();
-                    let (row, col) = selection::pixel_to_cell(x as f32, y as f32 - if tabs.tab_count() > 1 { ch } else { 0.0 }, cw, ch);
+                    let (row, col) = selection::pixel_to_cell(x as f32, y as f32 - tabs.mouse_y_offset(ch), cw, ch);
                     sel.update(row, col);
                     window.request_redraw();
                 }
             }
             AppEvent::MouseUp(x, y) => {
                 let (cw, ch) = drawer.cell_size();
-                let (row, col) = selection::pixel_to_cell(x as f32, y as f32 - if tabs.tab_count() > 1 { ch } else { 0.0 }, cw, ch);
+                let (row, col) = selection::pixel_to_cell(x as f32, y as f32 - tabs.mouse_y_offset(ch), cw, ch);
                 sel.update(row, col);
                 sel.finish();
                 if !sel.is_empty() {
@@ -289,7 +289,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                 drawer.resize(w, h);
                 let (cw, ch) = drawer.cell_size();
                 let (cols, rows) = zoom::calc_grid_size(w, h, cw, ch);
-                let term_rows = if tabs.tab_count() > 1 { rows.saturating_sub(1).max(1) } else { rows };
+                let term_rows = tabs.term_rows(rows);
                 for tab in tabs.tabs_mut() {
                     let mut state = tab.terminal.lock().unwrap();
                     state.grid.resize(cols, term_rows);
@@ -371,7 +371,7 @@ fn render_with_tabs(drawer: &mut GpuDrawer, tabs: &TabManager, preedit: &str, se
     let visible = state.grid.visible_cells();
     let sel_range = if !sel.is_empty() { Some(sel.normalized()) } else { None };
 
-    let show_tab_bar = tabs.tab_count() > 1;
+    let show_tab_bar = tabs.show_tab_bar();
     let (cell_w, cell_h) = drawer.cell_size();
     let row_offset = if show_tab_bar { 1 } else { 0 };
     let commands = growterm_render_cmd::generate_with_offset(&visible, cursor, preedit_str, sel_range, row_offset);
