@@ -1,6 +1,5 @@
 use std::cell::{Cell, RefCell};
 use std::sync::mpsc::Sender;
-use std::time::Instant;
 
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Sel};
@@ -30,7 +29,6 @@ pub struct Ivars {
     ime_state: Cell<ImeState>,
     marked_text: RefCell<String>,
     current_event: RefCell<Option<Retained<NSEvent>>>,
-    last_resize_sent: Cell<Option<Instant>>,
     pending_resize: Cell<Option<(u32, u32)>>,
 }
 
@@ -288,7 +286,6 @@ impl TerminalView {
             ime_state: Cell::new(ImeState::None),
             marked_text: RefCell::new(String::new()),
             current_event: RefCell::new(None),
-            last_resize_sent: Cell::new(None),
             pending_resize: Cell::new(None),
         });
         let this: Retained<Self> = unsafe { msg_send![super(this), init] };

@@ -93,6 +93,7 @@ impl TabManager {
         self.tabs.get_mut(self.active)
     }
 
+    #[allow(dead_code)]
     pub fn active_index(&self) -> usize {
         self.active
     }
@@ -105,6 +106,7 @@ impl TabManager {
         self.tabs.is_empty()
     }
 
+    #[allow(dead_code)]
     pub fn tabs(&self) -> &[Tab] {
         &self.tabs
     }

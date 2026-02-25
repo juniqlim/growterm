@@ -1,6 +1,5 @@
 const MIN_FONT_SIZE: f32 = 8.0;
 const MAX_FONT_SIZE: f32 = 72.0;
-const ZOOM_STEP: f32 = 2.0;
 
 pub fn apply_zoom(current: f32, delta: f32) -> f32 {
     (current + delta).clamp(MIN_FONT_SIZE, MAX_FONT_SIZE)
