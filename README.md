@@ -8,10 +8,9 @@ A terminal app that grows — GPU-accelerated terminal emulator written in Rust 
 
 ## Design Goals
 
-Build a structure where code changes can be **quickly verified with tests**.
-
-- **Encapsulation**: You don't need to know the VT parser to fix clipboard copy. Each module can be modified knowing only its own responsibility.
-- **Testing**: Pure functions and state machines are verified with unit tests; module interactions with integration tests.
+- **Modular**: Each module has a single responsibility. You don't need to know the VT parser to fix clipboard copy.
+- **Testable**: Pure functions and state machines are verified with unit tests; module interactions with integration tests.
+- **Evolvable**: Adding a new feature means adding a new module, not rewriting existing ones.
 
 ## Features
 
