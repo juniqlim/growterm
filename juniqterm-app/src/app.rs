@@ -13,7 +13,7 @@ use juniqterm_grid::Grid;
 use juniqterm_pty::PtyWriter;
 use juniqterm_vt_parser::VtParser;
 
-use crate::event_action::{self, Action};
+use crate::event_action::{self, Action, ImeHandler};
 use crate::key_convert::convert_key;
 use crate::zoom;
 
@@ -33,7 +33,7 @@ pub struct App {
     dirty: Arc<AtomicBool>,
     modifiers: ModifiersState,
     font_size: f32,
-    preedit_text: String,
+    ime: ImeHandler,
 }
 
 impl App {
@@ -47,7 +47,7 @@ impl App {
             dirty: Arc::new(AtomicBool::new(false)),
             modifiers: ModifiersState::empty(),
             font_size: FONT_SIZE,
-            preedit_text: String::new(),
+            ime: ImeHandler::new(),
         }
     }
 
@@ -98,10 +98,10 @@ impl App {
         if let (Some(drawer), Some(terminal)) = (&mut self.drawer, &self.terminal) {
             let state = terminal.lock().unwrap();
             let cursor = state.grid.cursor_pos();
-            let preedit = if self.preedit_text.is_empty() {
+            let preedit = if self.ime.preedit().is_empty() {
                 None
             } else {
-                Some(self.preedit_text.as_str())
+                Some(self.ime.preedit())
             };
             let commands =
                 juniqterm_render_cmd::generate(state.grid.cells(), Some(cursor), preedit);
@@ -184,9 +184,9 @@ impl ApplicationHandler<()> for App {
             WindowEvent::Ime(ime) => match ime {
                 Ime::Preedit(text, _) => {
                     eprintln!("[IME] Preedit: {:?}", text);
-                    match event_action::handle_ime_preedit(&text) {
-                        Action::SetPreedit(s) => self.preedit_text = s,
-                        _ => {}
+                    match self.ime.handle_ime_preedit(&text) {
+                        Action::SetPreedit(_) => {}
+                        Action::WritePty(bytes) => self.write_pty(&bytes),
                     }
                     if let Some(window) = &self.window {
                         window.request_redraw();
@@ -194,8 +194,7 @@ impl ApplicationHandler<()> for App {
                 }
                 Ime::Commit(text) => {
                     eprintln!("[IME] Commit: {:?}", text);
-                    self.preedit_text.clear();
-                    match event_action::handle_ime_commit(&text) {
+                    match self.ime.handle_ime_commit(&text) {
                         Action::WritePty(bytes) => self.write_pty(&bytes),
                         _ => {}
                     }
@@ -252,13 +251,12 @@ impl ApplicationHandler<()> for App {
 
                 eprintln!(
                     "[KEY] logical={:?} text={:?} is_plain_char={} preedit={:?}",
-                    event.logical_key, event.text, is_plain_char, self.preedit_text
+                    event.logical_key, event.text, is_plain_char, self.ime.preedit()
                 );
 
                 if is_plain_char {
-                    if let Some(action) = event_action::handle_plain_char_input(
+                    if let Some(action) = self.ime.handle_plain_char_input(
                         event.text.as_ref().map(|t| t.as_str()),
-                        !self.preedit_text.is_empty(),
                     ) {
                         match action {
                             Action::WritePty(bytes) => self.write_pty(&bytes),
