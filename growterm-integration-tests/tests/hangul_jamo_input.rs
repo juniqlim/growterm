@@ -1,48 +1,9 @@
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-fn build_binary() -> String {
-    let output = Command::new("cargo")
-        .args(["build", "--package", "growterm-app"])
-        .output()
-        .expect("failed to run cargo build");
-    assert!(
-        output.status.success(),
-        "cargo build failed:\n{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    let metadata = Command::new("cargo")
-        .args(["metadata", "--format-version=1", "--no-deps"])
-        .output()
-        .expect("failed to run cargo metadata");
-    let meta: serde_json::Value =
-        serde_json::from_slice(&metadata.stdout).expect("invalid cargo metadata json");
-    let target_dir = meta["target_directory"].as_str().unwrap();
-    format!("{target_dir}/debug/growterm")
-}
-
-fn parse_dump(content: &str) -> Vec<String> {
-    let mut lines = content.lines();
-    let _ = lines.next(); // cursor line
-    let _ = lines.next(); // "grid:"
-    lines.map(|l| l.to_string()).collect()
-}
-
-fn wait_for_dump(dump_path: &std::path::Path, timeout: Duration) -> Option<String> {
-    let deadline = std::time::Instant::now() + timeout;
-    while std::time::Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(200));
-        if dump_path.exists() {
-            if let Ok(content) = std::fs::read_to_string(dump_path) {
-                if !content.is_empty() {
-                    return Some(content);
-                }
-            }
-        }
-    }
-    None
-}
+use growterm_integration_tests::{
+    build_binary, cleanup, parse_dump_rows, spawn_with_dump, wait_for_dump,
+};
 
 fn activate_by_pid(pid: u32) {
     let script = format!(
@@ -65,15 +26,9 @@ fn osascript_jamo_keystroke_produces_composed_hangul() {
     ));
     let _ = std::fs::remove_file(&dump_path);
 
-    let mut child = Command::new(&bin)
-        .env("GROWTERM_GRID_DUMP", &dump_path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("failed to launch growterm");
+    let mut child = spawn_with_dump(&bin, &dump_path);
 
-    let prompt = wait_for_dump(&dump_path, Duration::from_secs(10));
+    let prompt = wait_for_dump(&dump_path, Duration::from_secs(10), None);
     assert!(prompt.is_some(), "셸 프롬프트가 렌더되지 않음");
 
     let pid = child.id();
@@ -95,14 +50,12 @@ fn osascript_jamo_keystroke_produces_composed_hangul() {
         .arg("tell application \"System Events\" to keystroke return")
         .output();
 
-    let dump_content = wait_for_dump(&dump_path, Duration::from_secs(10));
+    let dump_content = wait_for_dump(&dump_path, Duration::from_secs(10), None);
 
-    let _ = child.kill();
-    let _ = child.wait();
-    let _ = std::fs::remove_file(&dump_path);
+    cleanup(&mut child, &dump_path);
 
     let content = dump_content.expect("한글 입력 후 그리드 덤프가 생성되지 않음");
-    let rows = parse_dump(&content);
+    let rows = parse_dump_rows(&content);
     let all_text: String = rows.join("\n");
     let compact: String = all_text.chars().filter(|c| *c != ' ' && *c != '\0').collect();
 

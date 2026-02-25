@@ -2,14 +2,6 @@ const MIN_FONT_SIZE: f32 = 8.0;
 const MAX_FONT_SIZE: f32 = 72.0;
 const ZOOM_STEP: f32 = 2.0;
 
-pub fn zoom_delta(key: &str) -> Option<f32> {
-    match key {
-        "=" | "+" => Some(ZOOM_STEP),
-        "-" => Some(-ZOOM_STEP),
-        _ => None,
-    }
-}
-
 pub fn apply_zoom(current: f32, delta: f32) -> f32 {
     (current + delta).clamp(MIN_FONT_SIZE, MAX_FONT_SIZE)
 }
@@ -23,31 +15,6 @@ pub fn calc_grid_size(width: u32, height: u32, cell_w: f32, cell_h: f32) -> (u16
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // zoom_delta tests
-
-    #[test]
-    fn zoom_delta_equal_returns_positive() {
-        assert_eq!(zoom_delta("="), Some(ZOOM_STEP));
-    }
-
-    #[test]
-    fn zoom_delta_plus_returns_positive() {
-        assert_eq!(zoom_delta("+"), Some(ZOOM_STEP));
-    }
-
-    #[test]
-    fn zoom_delta_minus_returns_negative() {
-        assert_eq!(zoom_delta("-"), Some(-ZOOM_STEP));
-    }
-
-    #[test]
-    fn zoom_delta_other_key_returns_none() {
-        assert_eq!(zoom_delta("a"), None);
-        assert_eq!(zoom_delta("0"), None);
-    }
-
-    // apply_zoom tests
 
     #[test]
     fn apply_zoom_increases() {

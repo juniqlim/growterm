@@ -1,27 +1,7 @@
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-/// Build the growterm binary and return the path.
-fn build_binary() -> String {
-    let output = Command::new("cargo")
-        .args(["build", "--package", "growterm-app"])
-        .output()
-        .expect("failed to run cargo build");
-    assert!(
-        output.status.success(),
-        "cargo build failed:\n{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    let metadata = Command::new("cargo")
-        .args(["metadata", "--format-version=1", "--no-deps"])
-        .output()
-        .expect("failed to run cargo metadata");
-    let meta: serde_json::Value =
-        serde_json::from_slice(&metadata.stdout).expect("invalid cargo metadata json");
-    let target_dir = meta["target_directory"].as_str().unwrap();
-    format!("{target_dir}/debug/growterm")
-}
+use growterm_integration_tests::build_binary;
 
 #[test]
 fn app_starts_and_stays_alive() {

@@ -3,6 +3,9 @@ name = "growterm-integration-tests"
 version = "0.1.0"
 edition = "2021"
 
+[dependencies]
+serde_json = "1"
+
 [dev-dependencies]
 growterm-types = { path = "../growterm-types" }
 growterm-vt-parser = { path = "../growterm-vt-parser" }

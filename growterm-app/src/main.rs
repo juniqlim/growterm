@@ -1,7 +1,5 @@
 mod app;
 #[allow(dead_code)]
-mod event_action;
-#[allow(dead_code)]
 mod selection;
 mod zoom;
 
