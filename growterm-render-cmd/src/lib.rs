@@ -54,6 +54,16 @@ pub fn generate(
     preedit: Option<&str>,
     selection: Option<((u16, u16), (u16, u16))>,
 ) -> Vec<RenderCommand> {
+    generate_with_offset(cells, cursor_pos, preedit, selection, 0)
+}
+
+pub fn generate_with_offset(
+    cells: &[Vec<Cell>],
+    cursor_pos: Option<(u16, u16)>,
+    preedit: Option<&str>,
+    selection: Option<((u16, u16), (u16, u16))>,
+    row_offset: u16,
+) -> Vec<RenderCommand> {
     let mut commands = Vec::new();
     for (row, line) in cells.iter().enumerate() {
         let mut skip_next = false;
@@ -116,7 +126,7 @@ pub fn generate(
 
             commands.push(RenderCommand {
                 col: col as u16,
-                row: row as u16,
+                row: row as u16 + row_offset,
                 character: cell.character,
                 fg,
                 bg,
@@ -138,7 +148,7 @@ pub fn generate(
                 | if width > 1 { CellFlags::WIDE_CHAR } else { CellFlags::empty() };
             commands.push(RenderCommand {
                 col,
-                row: cursor_row,
+                row: cursor_row + row_offset,
                 character: ch,
                 fg: DEFAULT_BG,
                 bg: DEFAULT_FG,

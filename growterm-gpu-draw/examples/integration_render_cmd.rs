@@ -100,7 +100,7 @@ impl ApplicationHandler for App {
                 if let Some(drawer) = &mut self.drawer {
                     // Integration pipeline: Cell → generate() → draw()
                     let commands = generate(&self.grid, None, None, None);
-                    drawer.draw(&commands);
+                    drawer.draw(&commands, None, None);
                 }
             }
             _ => {}

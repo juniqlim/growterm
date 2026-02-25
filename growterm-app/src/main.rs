@@ -1,6 +1,7 @@
 mod app;
 #[allow(dead_code)]
 mod selection;
+mod tab;
 mod zoom;
 
 const FONT_SIZE: f32 = 32.0;

@@ -2,7 +2,7 @@ mod atlas;
 mod renderer;
 
 pub use atlas::GlyphAtlas;
-pub use renderer::GpuDrawer;
+pub use renderer::{GpuDrawer, TabBarInfo};
 
 #[cfg(test)]
 mod tests {

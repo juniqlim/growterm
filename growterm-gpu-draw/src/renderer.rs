@@ -60,6 +60,14 @@ struct GlyphRegion {
 
 const GLYPH_TEXTURE_SIZE: u32 = 1024;
 
+/// Tab bar rendering info passed from the app layer.
+pub struct TabBarInfo {
+    pub titles: Vec<String>,
+    pub active_index: usize,
+    pub cell_h: f32,
+    pub cell_w: f32,
+}
+
 impl GpuDrawer {
     pub fn new<W>(window: std::sync::Arc<W>, width: u32, height: u32, font_size: f32) -> Self
     where
@@ -352,7 +360,7 @@ impl GpuDrawer {
         self.atlas.cell_size()
     }
 
-    pub fn draw(&mut self, commands: &[RenderCommand], scrollbar: Option<(f32, f32)>) {
+    pub fn draw(&mut self, commands: &[RenderCommand], scrollbar: Option<(f32, f32)>, tab_bar: Option<&TabBarInfo>) {
         if self.surface_dirty {
             self.surface_dirty = false;
             self.surface.configure(&self.device, &self.surface_config);
@@ -393,7 +401,7 @@ impl GpuDrawer {
         let mut glyph_vertices: Vec<GlyphVertex> = Vec::new();
 
         // Helper: push a fg-colored rectangle into bg_vertices
-        let mut push_rect = |bg_verts: &mut Vec<BgVertex>, x: f32, y: f32, w: f32, h: f32, color: [f32; 3]| {
+        let push_rect = |bg_verts: &mut Vec<BgVertex>, x: f32, y: f32, w: f32, h: f32, color: [f32; 3]| {
             bg_verts.push(BgVertex { position: [x, y], color });
             bg_verts.push(BgVertex { position: [x + w, y], color });
             bg_verts.push(BgVertex { position: [x, y + h], color });
@@ -542,6 +550,57 @@ impl GpuDrawer {
             let h = thumb_height_ratio * screen_h;
             let color = [0.5, 0.5, 0.5];
             push_rect(&mut bg_vertices, x0, y0, bar_w, h, color);
+        }
+
+        // Tab bar
+        if let Some(tab_info) = tab_bar {
+            let bar_h = tab_info.cell_h;
+            let screen_w = self.surface_config.width as f32;
+            let bar_bg: [f32; 3] = [0.15, 0.15, 0.15];
+            let active_bg: [f32; 3] = [0.3, 0.3, 0.3];
+
+            push_rect(&mut bg_vertices, 0.0, 0.0, screen_w, bar_h, bar_bg);
+
+            let mut x = 0.0_f32;
+            let pad = tab_info.cell_w;
+            for (i, title) in tab_info.titles.iter().enumerate() {
+                let text_w = title.chars().count() as f32 * tab_info.cell_w;
+                let tab_w = text_w + pad * 2.0;
+
+                if i == tab_info.active_index {
+                    push_rect(&mut bg_vertices, x, 0.0, tab_w, bar_h, active_bg);
+                }
+
+                let mut cx = x + pad;
+                for ch in title.chars() {
+                    if ch == ' ' {
+                        cx += tab_info.cell_w;
+                        continue;
+                    }
+                    let region = self.ensure_glyph_in_atlas(ch);
+                    if region.width > 0 && region.height > 0 {
+                        let baseline_y = bar_h * 0.8;
+                        let gx = cx + region.offset_x;
+                        let gy = baseline_y - region.offset_y - region.height as f32;
+                        let gw = region.width as f32;
+                        let gh = region.height as f32;
+                        let color: [f32; 3] = if i == tab_info.active_index {
+                            [1.0, 1.0, 1.0]
+                        } else {
+                            [0.6, 0.6, 0.6]
+                        };
+                        glyph_vertices.push(GlyphVertex { position: [gx, gy], tex_coords: [region.u0, region.v0], color });
+                        glyph_vertices.push(GlyphVertex { position: [gx + gw, gy], tex_coords: [region.u1, region.v0], color });
+                        glyph_vertices.push(GlyphVertex { position: [gx, gy + gh], tex_coords: [region.u0, region.v1], color });
+                        glyph_vertices.push(GlyphVertex { position: [gx + gw, gy], tex_coords: [region.u1, region.v0], color });
+                        glyph_vertices.push(GlyphVertex { position: [gx + gw, gy + gh], tex_coords: [region.u1, region.v1], color });
+                        glyph_vertices.push(GlyphVertex { position: [gx, gy + gh], tex_coords: [region.u0, region.v1], color });
+                    }
+                    cx += tab_info.cell_w;
+                }
+
+                x += tab_w;
+            }
         }
 
         let bg_buffer = self

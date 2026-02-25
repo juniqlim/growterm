@@ -20,6 +20,19 @@ pub mod keycode {
     pub const ANSI_V: u16 = 0x09;
     pub const ANSI_EQUAL: u16 = 0x18;
     pub const ANSI_MINUS: u16 = 0x1B;
+    pub const ANSI_T: u16 = 0x11;
+    pub const ANSI_W: u16 = 0x0D;
+    pub const ANSI_LEFT_BRACKET: u16 = 0x21;
+    pub const ANSI_RIGHT_BRACKET: u16 = 0x1E;
+    pub const ANSI_1: u16 = 0x12;
+    pub const ANSI_2: u16 = 0x13;
+    pub const ANSI_3: u16 = 0x14;
+    pub const ANSI_4: u16 = 0x15;
+    pub const ANSI_5: u16 = 0x17;
+    pub const ANSI_6: u16 = 0x16;
+    pub const ANSI_7: u16 = 0x1A;
+    pub const ANSI_8: u16 = 0x1C;
+    pub const ANSI_9: u16 = 0x19;
 }
 
 /// macOS keycode + characters → growterm_types::KeyEvent 변환

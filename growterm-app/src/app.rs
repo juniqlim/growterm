@@ -1,19 +1,13 @@
-use std::io::{Read, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::io::Write;
+use std::sync::atomic::Ordering;
+use std::sync::{mpsc, Arc};
 
-use growterm_gpu_draw::GpuDrawer;
-use growterm_grid::Grid;
+use growterm_gpu_draw::{GpuDrawer, TabBarInfo};
 use growterm_macos::{AppEvent, MacWindow, Modifiers};
-use growterm_vt_parser::VtParser;
 
 use crate::selection::{self, Selection};
+use crate::tab::{Tab, TabManager};
 use crate::zoom;
-
-struct TerminalState {
-    grid: Grid,
-    vt_parser: VtParser,
-}
 
 pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: GpuDrawer) {
     let (cell_w, cell_h) = drawer.cell_size();
@@ -21,22 +15,23 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
     let (width, height) = window.inner_size();
 
     let (cols, rows) = zoom::calc_grid_size(width, height, cell_w, cell_h);
+    // Reserve 1 row for tab bar
+    let term_rows = rows.saturating_sub(1).max(1);
 
-    let grid = Grid::new(cols, rows);
-    let vt_parser = VtParser::new();
-    let terminal = Arc::new(Mutex::new(TerminalState { grid, vt_parser }));
-    let dirty = Arc::new(AtomicBool::new(false));
+    let mut tabs = TabManager::new();
+    let mut tab_counter: usize = 0;
 
-    let mut pty_writer = match growterm_pty::spawn(rows, cols) {
-        Ok((reader, writer)) => {
-            start_io_thread(reader, Arc::clone(&terminal), Arc::clone(&dirty), window.clone());
-            writer
+    // Spawn initial tab
+    match Tab::spawn(term_rows, cols, tab_counter, window.clone()) {
+        Ok(tab) => {
+            tabs.add_tab(tab);
+            tab_counter += 1;
         }
         Err(e) => {
             eprintln!("Failed to spawn PTY: {e}");
             return;
         }
-    };
+    }
 
     let mut preedit = String::new();
     let mut sel = Selection::default();
@@ -58,46 +53,125 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
         match event {
             AppEvent::TextCommit(text) => {
                 preedit.clear();
-                let _ = pty_writer.write_all(text.as_bytes());
-                let _ = pty_writer.flush();
+                if let Some(tab) = tabs.active_tab_mut() {
+                    let _ = tab.pty_writer.write_all(text.as_bytes());
+                    let _ = tab.pty_writer.flush();
+                }
             }
             AppEvent::Preedit(text) => {
                 preedit = text;
                 window.request_redraw();
             }
             AppEvent::KeyInput { keycode, characters, modifiers } => {
-                // Cmd+= / Cmd+- (zoom), Cmd+V (paste), Cmd+PageUp/Down (scroll)
+                use growterm_macos::key_convert::keycode as kc;
+
                 if modifiers.contains(Modifiers::SUPER) {
-                    if keycode == growterm_macos::key_convert::keycode::PAGE_UP
-                        || keycode == growterm_macos::key_convert::keycode::PAGE_DOWN
-                    {
-                        let mut state = terminal.lock().unwrap();
-                        let row_count = state.grid.cells().len();
-                        if keycode == growterm_macos::key_convert::keycode::PAGE_UP {
-                            state.grid.scroll_up_view(row_count);
-                        } else {
-                            state.grid.scroll_down_view(row_count);
+                    // Cmd+T: new tab
+                    if keycode == kc::ANSI_T {
+                        let (cw, ch) = drawer.cell_size();
+                        let (w, h) = window.inner_size();
+                        let (cols, rows) = zoom::calc_grid_size(w, h, cw, ch);
+                        let term_rows = rows.saturating_sub(1).max(1);
+                        match Tab::spawn(term_rows, cols, tab_counter, window.clone()) {
+                            Ok(tab) => {
+                                tabs.add_tab(tab);
+                                tab_counter += 1;
+                                sel.clear();
+                                preedit.clear();
+                            }
+                            Err(e) => eprintln!("Failed to spawn tab: {e}"),
                         }
-                        drop(state);
-                        render(&mut drawer, &terminal, &preedit, &sel);
+                        render_with_tabs(&mut drawer, &tabs, &preedit, &sel);
                         continue;
                     }
-                    // Cmd+V paste (keycode 비교: 한글 IME에서도 동작)
-                    if keycode == growterm_macos::key_convert::keycode::ANSI_V {
+
+                    // Cmd+W: close tab
+                    if keycode == kc::ANSI_W {
+                        tabs.close_active();
+                        if tabs.is_empty() {
+                            std::process::exit(0);
+                        }
+                        sel.clear();
+                        preedit.clear();
+                        render_with_tabs(&mut drawer, &tabs, &preedit, &sel);
+                        continue;
+                    }
+
+                    // Cmd+Shift+[ / Cmd+Shift+]: prev/next tab
+                    if modifiers.contains(Modifiers::SHIFT) {
+                        if keycode == kc::ANSI_LEFT_BRACKET {
+                            tabs.prev_tab();
+                            sel.clear();
+                            preedit.clear();
+                            render_with_tabs(&mut drawer, &tabs, &preedit, &sel);
+                            continue;
+                        }
+                        if keycode == kc::ANSI_RIGHT_BRACKET {
+                            tabs.next_tab();
+                            sel.clear();
+                            preedit.clear();
+                            render_with_tabs(&mut drawer, &tabs, &preedit, &sel);
+                            continue;
+                        }
+                    }
+
+                    // Cmd+1~9: switch to tab by number
+                    let tab_num = match keycode {
+                        k if k == kc::ANSI_1 => Some(0),
+                        k if k == kc::ANSI_2 => Some(1),
+                        k if k == kc::ANSI_3 => Some(2),
+                        k if k == kc::ANSI_4 => Some(3),
+                        k if k == kc::ANSI_5 => Some(4),
+                        k if k == kc::ANSI_6 => Some(5),
+                        k if k == kc::ANSI_7 => Some(6),
+                        k if k == kc::ANSI_8 => Some(7),
+                        k if k == kc::ANSI_9 => Some(8),
+                        _ => None,
+                    };
+                    if let Some(idx) = tab_num {
+                        if idx < tabs.tab_count() {
+                            tabs.switch_to(idx);
+                            sel.clear();
+                            preedit.clear();
+                            render_with_tabs(&mut drawer, &tabs, &preedit, &sel);
+                        }
+                        continue;
+                    }
+
+                    // Cmd+PageUp/Down: scroll
+                    if keycode == kc::PAGE_UP || keycode == kc::PAGE_DOWN {
+                        if let Some(tab) = tabs.active_tab() {
+                            let mut state = tab.terminal.lock().unwrap();
+                            let row_count = state.grid.cells().len();
+                            if keycode == kc::PAGE_UP {
+                                state.grid.scroll_up_view(row_count);
+                            } else {
+                                state.grid.scroll_down_view(row_count);
+                            }
+                        }
+                        render_with_tabs(&mut drawer, &tabs, &preedit, &sel);
+                        continue;
+                    }
+
+                    // Cmd+V paste
+                    if keycode == kc::ANSI_V {
                         if let Ok(mut clipboard) = arboard::Clipboard::new() {
                             if let Ok(text) = clipboard.get_text() {
                                 if !text.is_empty() {
-                                    let _ = pty_writer.write_all(text.as_bytes());
-                                    let _ = pty_writer.flush();
+                                    if let Some(tab) = tabs.active_tab_mut() {
+                                        let _ = tab.pty_writer.write_all(text.as_bytes());
+                                        let _ = tab.pty_writer.flush();
+                                    }
                                 }
                             }
                         }
                         continue;
                     }
-                    // Cmd+= / Cmd+- (zoom, keycode 비교: 한글 IME에서도 동작)
+
+                    // Cmd+= / Cmd+- (zoom)
                     let zoom_delta = match keycode {
-                        kc if kc == growterm_macos::key_convert::keycode::ANSI_EQUAL => Some(2.0f32),
-                        kc if kc == growterm_macos::key_convert::keycode::ANSI_MINUS => Some(-2.0f32),
+                        k if k == kc::ANSI_EQUAL => Some(2.0f32),
+                        k if k == kc::ANSI_MINUS => Some(-2.0f32),
                         _ => None,
                     };
                     if let Some(delta) = zoom_delta {
@@ -106,11 +180,15 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                         let (cw, ch) = drawer.cell_size();
                         let (w, h) = window.inner_size();
                         let (cols, rows) = zoom::calc_grid_size(w, h, cw, ch);
-                        let mut state = terminal.lock().unwrap();
-                        state.grid.resize(cols, rows);
-                        drop(state);
-                        let _ = pty_writer.resize(rows, cols);
-                        render(&mut drawer, &terminal, &preedit, &sel);
+                        let term_rows = rows.saturating_sub(1).max(1);
+                        // Resize all tabs
+                        for tab in tabs.tabs_mut() {
+                            let mut state = tab.terminal.lock().unwrap();
+                            state.grid.resize(cols, term_rows);
+                            drop(state);
+                            let _ = tab.pty_writer.resize(term_rows, cols);
+                        }
+                        render_with_tabs(&mut drawer, &tabs, &preedit, &sel);
                         continue;
                     }
                     continue;
@@ -122,36 +200,40 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     modifiers,
                 ) {
                     let bytes = growterm_input::encode(key_event);
-                    let _ = pty_writer.write_all(&bytes);
-                    let _ = pty_writer.flush();
+                    if let Some(tab) = tabs.active_tab_mut() {
+                        let _ = tab.pty_writer.write_all(&bytes);
+                        let _ = tab.pty_writer.flush();
+                    }
                 }
             }
             AppEvent::MouseDown(x, y) => {
                 let (cw, ch) = drawer.cell_size();
-                let (row, col) = selection::pixel_to_cell(x as f32, y as f32, cw, ch);
+                let (row, col) = selection::pixel_to_cell(x as f32, y as f32 - ch, cw, ch);
                 sel.begin(row, col);
                 window.request_redraw();
             }
             AppEvent::MouseDragged(x, y) => {
                 if sel.active {
                     let (cw, ch) = drawer.cell_size();
-                    let (row, col) = selection::pixel_to_cell(x as f32, y as f32, cw, ch);
+                    let (row, col) = selection::pixel_to_cell(x as f32, y as f32 - ch, cw, ch);
                     sel.update(row, col);
                     window.request_redraw();
                 }
             }
             AppEvent::MouseUp(x, y) => {
                 let (cw, ch) = drawer.cell_size();
-                let (row, col) = selection::pixel_to_cell(x as f32, y as f32, cw, ch);
+                let (row, col) = selection::pixel_to_cell(x as f32, y as f32 - ch, cw, ch);
                 sel.update(row, col);
                 sel.finish();
                 if !sel.is_empty() {
-                    let state = terminal.lock().unwrap();
-                    let text = selection::extract_text(state.grid.cells(), &sel);
-                    drop(state);
-                    if !text.is_empty() {
-                        if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                            let _ = clipboard.set_text(text);
+                    if let Some(tab) = tabs.active_tab() {
+                        let state = tab.terminal.lock().unwrap();
+                        let text = selection::extract_text(state.grid.cells(), &sel);
+                        drop(state);
+                        if !text.is_empty() {
+                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                let _ = clipboard.set_text(text);
+                            }
                         }
                     }
                 }
@@ -164,18 +246,18 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                 let lines = (scroll_accum / line_height).trunc() as i32;
                 if lines != 0 {
                     scroll_accum -= lines as f64 * line_height;
-                    let mut state = terminal.lock().unwrap();
-                    if lines > 0 {
-                        state.grid.scroll_up_view(lines as usize);
-                    } else {
-                        state.grid.scroll_down_view((-lines) as usize);
+                    if let Some(tab) = tabs.active_tab() {
+                        let mut state = tab.terminal.lock().unwrap();
+                        if lines > 0 {
+                            state.grid.scroll_up_view(lines as usize);
+                        } else {
+                            state.grid.scroll_down_view((-lines) as usize);
+                        }
                     }
-                    drop(state);
-                    render(&mut drawer, &terminal, &preedit, &sel);
+                    render_with_tabs(&mut drawer, &tabs, &preedit, &sel);
                 }
             }
             AppEvent::Resize(mut w, mut h) => {
-                // Coalesce queued resize events to avoid redundant GPU work
                 loop {
                     match rx.try_recv() {
                         Ok(AppEvent::Resize(nw, nh)) => { w = nw; h = nh; }
@@ -186,43 +268,48 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                 drawer.resize(w, h);
                 let (cw, ch) = drawer.cell_size();
                 let (cols, rows) = zoom::calc_grid_size(w, h, cw, ch);
-                terminal.lock().unwrap().grid.resize(cols, rows);
-                let _ = pty_writer.resize(rows, cols);
-                render(&mut drawer, &terminal, &preedit, &sel);
+                let term_rows = rows.saturating_sub(1).max(1);
+                for tab in tabs.tabs_mut() {
+                    let mut state = tab.terminal.lock().unwrap();
+                    state.grid.resize(cols, term_rows);
+                    drop(state);
+                    let _ = tab.pty_writer.resize(term_rows, cols);
+                }
+                render_with_tabs(&mut drawer, &tabs, &preedit, &sel);
             }
             AppEvent::RedrawRequested => {
-                let was_dirty = dirty.swap(false, Ordering::Relaxed);
-                render(&mut drawer, &terminal, &preedit, &sel);
+                let was_dirty = tabs.active_tab().map_or(false, |t| t.dirty.swap(false, Ordering::Relaxed));
+                render_with_tabs(&mut drawer, &tabs, &preedit, &sel);
                 if was_dirty {
                     if let Some(ref path) = grid_dump_path {
                         let dump_file = std::path::Path::new(path);
                         if dump_file.exists() {
                             continue;
                         }
-                        let state = terminal.lock().unwrap();
-                        let has_content = state.grid.cells().iter().any(|row| {
-                            row.iter().any(|c| c.character != '\0' && c.character != ' ')
-                        });
-                        if has_content {
-                            let (crow, ccol) = state.grid.cursor_pos();
-                            let mut dump = format!("cursor:{crow},{ccol}\ngrid:\n");
-                            for row in state.grid.cells() {
-                                let text: String = row.iter().map(|c| c.character).collect();
-                                dump.push_str(text.trim_end_matches(|c: char| c == '\0' || c == ' '));
-                                dump.push('\n');
-                            }
-                            drop(state);
-                            // If test_input is set and not yet sent, send it and wait for next dirty render.
-                            if let Some(ref input) = test_input {
-                                if !test_input_sent {
-                                    let _ = pty_writer.write_all(input.as_bytes());
-                                    let _ = pty_writer.flush();
-                                    test_input_sent = true;
-                                    // Don't dump yet — wait for the command output.
-                                    continue;
+                        if let Some(tab) = tabs.active_tab_mut() {
+                            let state = tab.terminal.lock().unwrap();
+                            let has_content = state.grid.cells().iter().any(|row: &Vec<growterm_types::Cell>| {
+                                row.iter().any(|c| c.character != '\0' && c.character != ' ')
+                            });
+                            if has_content {
+                                let (crow, ccol) = state.grid.cursor_pos();
+                                let mut dump = format!("cursor:{crow},{ccol}\ngrid:\n");
+                                for row in state.grid.cells() {
+                                    let text: String = row.iter().map(|c: &growterm_types::Cell| c.character).collect();
+                                    dump.push_str(text.trim_end_matches(|c: char| c == '\0' || c == ' '));
+                                    dump.push('\n');
                                 }
+                                drop(state);
+                                if let Some(ref input) = test_input {
+                                    if !test_input_sent {
+                                        let _ = tab.pty_writer.write_all(input.as_bytes());
+                                        let _ = tab.pty_writer.flush();
+                                        test_input_sent = true;
+                                        continue;
+                                    }
+                                }
+                                let _ = std::fs::write(path, &dump);
                             }
-                            let _ = std::fs::write(path, &dump);
                         }
                     }
                 }
@@ -234,8 +321,13 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
     }
 }
 
-fn render(drawer: &mut GpuDrawer, terminal: &Arc<Mutex<TerminalState>>, preedit: &str, sel: &Selection) {
-    let state = terminal.lock().unwrap();
+fn render_with_tabs(drawer: &mut GpuDrawer, tabs: &TabManager, preedit: &str, sel: &Selection) {
+    let tab = match tabs.active_tab() {
+        Some(t) => t,
+        None => return,
+    };
+
+    let state = tab.terminal.lock().unwrap();
     let scrolled = state.grid.scroll_offset() > 0;
     let cursor = if scrolled { None } else { Some(state.grid.cursor_pos()) };
     let preedit_str = if preedit.is_empty() || scrolled {
@@ -257,41 +349,18 @@ fn render(drawer: &mut GpuDrawer, terminal: &Arc<Mutex<TerminalState>>, preedit:
     };
     let visible = state.grid.visible_cells();
     let sel_range = if !sel.is_empty() { Some(sel.normalized()) } else { None };
-    let commands = growterm_render_cmd::generate(&visible, cursor, preedit_str, sel_range);
-    drop(state);
-    drawer.draw(&commands, scrollbar);
-}
 
-fn start_io_thread(
-    mut reader: growterm_pty::PtyReader,
-    terminal: Arc<Mutex<TerminalState>>,
-    dirty: Arc<AtomicBool>,
-    window: Arc<MacWindow>,
-) {
-    std::thread::spawn(move || {
-        let mut buf = [0u8; 4096];
-        loop {
-            match reader.read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => {
-                        let mut state = terminal.lock().unwrap();
-                    let commands = state.vt_parser.parse(&buf[..n]);
-                    for cmd in &commands {
-                        state.grid.apply(cmd);
-                    }
-                    state.grid.reset_scroll();
-                    drop(state);
-                    dirty.store(true, Ordering::Relaxed);
-                    window.request_redraw();
-                }
-                Err(e) => {
-                    if e.raw_os_error() == Some(libc::EIO) {
-                        break;
-                    }
-                    break;
-                }
-            }
-        }
-        window.request_redraw();
-    });
+    // Offset render commands by 1 row for tab bar
+    let (cell_w, cell_h) = drawer.cell_size();
+    let commands = growterm_render_cmd::generate_with_offset(&visible, cursor, preedit_str, sel_range, 1);
+    drop(state);
+
+    let tab_bar = TabBarInfo {
+        titles: tabs.tab_bar_info().titles,
+        active_index: tabs.tab_bar_info().active_index,
+        cell_h,
+        cell_w,
+    };
+
+    drawer.draw(&commands, scrollbar, Some(&tab_bar));
 }
