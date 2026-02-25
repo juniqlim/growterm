@@ -19,23 +19,22 @@ pub struct GlyphAtlas {
 
 impl GlyphAtlas {
     pub fn new(size: f32) -> Self {
-        let font_data = include_bytes!("/System/Library/Fonts/Menlo.ttc");
+        let font_data = include_bytes!("../fonts/FiraCodeNerdFontMono-Retina.ttf");
         let settings = fontdue::FontSettings {
             scale: size,
-            collection_index: 0, // Regular
             ..Default::default()
         };
         let font = fontdue::Font::from_bytes(font_data as &[u8], settings)
-            .expect("failed to load Menlo font");
+            .expect("failed to load Fira Code Nerd Font");
 
-        let fallback_data = include_bytes!("/System/Library/Fonts/AppleSDGothicNeo.ttc");
+        let fallback_data = include_bytes!("../fonts/D2Coding.ttc");
         let fallback_settings = fontdue::FontSettings {
             scale: size,
             collection_index: 0,
             ..Default::default()
         };
         let fallback_font = fontdue::Font::from_bytes(fallback_data as &[u8], fallback_settings)
-            .expect("failed to load fallback font");
+            .expect("failed to load D2Coding fallback font");
 
         let metrics = font.metrics('M', size);
         let line_metrics = font.horizontal_line_metrics(size);

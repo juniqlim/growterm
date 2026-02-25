@@ -35,6 +35,14 @@ mod tests {
         assert!(glyph.height > 0);
     }
 
+    #[test]
+    fn rasterize_nerd_font_symbol() {
+        let mut atlas = GlyphAtlas::new(24.0);
+        let glyph = atlas.get_or_insert('☒'); // U+2612
+        assert!(glyph.width > 0);
+        assert!(glyph.height > 0);
+    }
+
     // --- GlyphAtlas: 캐싱 ---
     #[test]
     fn second_lookup_returns_cached() {
