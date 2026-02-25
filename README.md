@@ -53,6 +53,14 @@ cargo build --release
 cargo run -p growterm-app
 ```
 
+### Install as macOS App
+
+```bash
+./install.sh
+```
+
+Builds the release binary and installs `growTerm.app` to `/Applications`.
+
 ## Test
 
 ```bash

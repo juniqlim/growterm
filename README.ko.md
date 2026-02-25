@@ -53,6 +53,14 @@ cargo build --release
 cargo run -p growterm-app
 ```
 
+### macOS 앱으로 설치
+
+```bash
+./install.sh
+```
+
+릴리스 바이너리를 빌드하고 `growTerm.app`을 `/Applications`에 설치한다.
+
 ## 테스트
 
 ```bash
