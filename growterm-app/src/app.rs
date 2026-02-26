@@ -60,7 +60,11 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                 preedit = text;
                 window.request_redraw();
             }
-            AppEvent::KeyInput { keycode, characters, modifiers } => {
+            AppEvent::KeyInput {
+                keycode,
+                characters,
+                modifiers,
+            } => {
                 use growterm_macos::key_convert::keycode as kc;
 
                 if modifiers.contains(Modifiers::SUPER) {
@@ -231,11 +235,9 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     continue;
                 }
 
-                if let Some(key_event) = growterm_macos::convert_key(
-                    keycode,
-                    characters.as_deref(),
-                    modifiers,
-                ) {
+                if let Some(key_event) =
+                    growterm_macos::convert_key(keycode, characters.as_deref(), modifiers)
+                {
                     let bytes = growterm_input::encode(key_event);
                     if let Some(tab) = tabs.active_tab_mut() {
                         let _ = tab.pty_writer.write_all(&bytes);
@@ -245,10 +247,14 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
             }
             AppEvent::MouseDown(x, y) => {
                 let (cw, ch) = drawer.cell_size();
-                let (screen_row, col) = selection::pixel_to_cell(x as f32, y as f32 - tabs.mouse_y_offset(ch), cw, ch);
+                let (screen_row, col) =
+                    selection::pixel_to_cell(x as f32, y as f32 - tabs.mouse_y_offset(ch), cw, ch);
                 let abs_row = if let Some(tab) = tabs.active_tab() {
                     let state = tab.terminal.lock().unwrap();
-                    let base = state.grid.scrollback_len().saturating_sub(state.grid.scroll_offset());
+                    let base = state
+                        .grid
+                        .scrollback_len()
+                        .saturating_sub(state.grid.scroll_offset());
                     screen_row as u32 + base as u32
                 } else {
                     screen_row as u32
@@ -259,10 +265,18 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
             AppEvent::MouseDragged(x, y) => {
                 if sel.active {
                     let (cw, ch) = drawer.cell_size();
-                    let (screen_row, col) = selection::pixel_to_cell(x as f32, y as f32 - tabs.mouse_y_offset(ch), cw, ch);
+                    let (screen_row, col) = selection::pixel_to_cell(
+                        x as f32,
+                        y as f32 - tabs.mouse_y_offset(ch),
+                        cw,
+                        ch,
+                    );
                     let abs_row = if let Some(tab) = tabs.active_tab() {
                         let state = tab.terminal.lock().unwrap();
-                        let base = state.grid.scrollback_len().saturating_sub(state.grid.scroll_offset());
+                        let base = state
+                            .grid
+                            .scrollback_len()
+                            .saturating_sub(state.grid.scroll_offset());
                         screen_row as u32 + base as u32
                     } else {
                         screen_row as u32
@@ -273,10 +287,14 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
             }
             AppEvent::MouseUp(x, y) => {
                 let (cw, ch) = drawer.cell_size();
-                let (screen_row, col) = selection::pixel_to_cell(x as f32, y as f32 - tabs.mouse_y_offset(ch), cw, ch);
+                let (screen_row, col) =
+                    selection::pixel_to_cell(x as f32, y as f32 - tabs.mouse_y_offset(ch), cw, ch);
                 let abs_row = if let Some(tab) = tabs.active_tab() {
                     let state = tab.terminal.lock().unwrap();
-                    let base = state.grid.scrollback_len().saturating_sub(state.grid.scroll_offset());
+                    let base = state
+                        .grid
+                        .scrollback_len()
+                        .saturating_sub(state.grid.scroll_offset());
                     screen_row as u32 + base as u32
                 } else {
                     screen_row as u32
@@ -306,8 +324,14 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
             AppEvent::Resize(mut w, mut h) => {
                 loop {
                     match rx.try_recv() {
-                        Ok(AppEvent::Resize(nw, nh)) => { w = nw; h = nh; }
-                        Ok(other) => { deferred = Some(other); break; }
+                        Ok(AppEvent::Resize(nw, nh)) => {
+                            w = nw;
+                            h = nh;
+                        }
+                        Ok(other) => {
+                            deferred = Some(other);
+                            break;
+                        }
                         Err(_) => break,
                     }
                 }
@@ -324,7 +348,9 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                 render_with_tabs(&mut drawer, &tabs, &preedit, &sel);
             }
             AppEvent::RedrawRequested => {
-                let was_dirty = tabs.active_tab().map_or(false, |t| t.dirty.swap(false, Ordering::Relaxed));
+                let was_dirty = tabs
+                    .active_tab()
+                    .map_or(false, |t| t.dirty.swap(false, Ordering::Relaxed));
                 render_with_tabs(&mut drawer, &tabs, &preedit, &sel);
                 if was_dirty {
                     if let Some(ref path) = grid_dump_path {
@@ -334,22 +360,34 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                         }
                         if let Some(tab) = tabs.active_tab_mut() {
                             let state = tab.terminal.lock().unwrap();
-                            let has_content = state.grid.cells().iter().any(|row: &Vec<growterm_types::Cell>| {
-                                row.iter().any(|c| c.character != '\0' && c.character != ' ')
-                            });
+                            let has_content =
+                                state
+                                    .grid
+                                    .cells()
+                                    .iter()
+                                    .any(|row: &Vec<growterm_types::Cell>| {
+                                        row.iter()
+                                            .any(|c| c.character != '\0' && c.character != ' ')
+                                    });
                             if has_content {
                                 let (crow, ccol) = state.grid.cursor_pos();
                                 let mut dump = format!("cursor:{crow},{ccol}\ngrid:\n");
                                 for row in state.grid.cells() {
-                                    let text: String = row.iter().map(|c: &growterm_types::Cell| c.character).collect();
-                                    dump.push_str(text.trim_end_matches(|c: char| c == '\0' || c == ' '));
+                                    let text: String = row
+                                        .iter()
+                                        .map(|c: &growterm_types::Cell| c.character)
+                                        .collect();
+                                    dump.push_str(
+                                        text.trim_end_matches(|c: char| c == '\0' || c == ' '),
+                                    );
                                     dump.push('\n');
                                 }
                                 drop(state);
                                 if let Some(ref dropped_path) = test_dropped_path {
                                     if !test_drop_sent && !dropped_path.is_empty() {
                                         test_drop_sent = true;
-                                        deferred = Some(AppEvent::FileDropped(vec![dropped_path.clone()]));
+                                        deferred =
+                                            Some(AppEvent::FileDropped(vec![dropped_path.clone()]));
                                         continue;
                                     }
                                 }
@@ -401,7 +439,11 @@ fn render_with_tabs(drawer: &mut GpuDrawer, tabs: &TabManager, preedit: &str, se
 
     let state = tab.terminal.lock().unwrap();
     let scrolled = state.grid.scroll_offset() > 0;
-    let cursor = if scrolled { None } else { Some(state.grid.cursor_pos()) };
+    let cursor = if scrolled {
+        None
+    } else {
+        Some(state.grid.cursor_pos())
+    };
     let preedit_str = if preedit.is_empty() || scrolled {
         None
     } else {
@@ -420,14 +462,24 @@ fn render_with_tabs(drawer: &mut GpuDrawer, tabs: &TabManager, preedit: &str, se
         None
     };
     let visible = state.grid.visible_cells();
-    let view_base = (state.grid.scrollback_len().saturating_sub(state.grid.scroll_offset())) as u32;
+    let view_base = (state
+        .grid
+        .scrollback_len()
+        .saturating_sub(state.grid.scroll_offset())) as u32;
     let visible_rows = visible.len() as u16;
     let sel_range = sel.screen_normalized(view_base, visible_rows);
 
     let show_tab_bar = tabs.show_tab_bar();
     let (cell_w, cell_h) = drawer.cell_size();
     let row_offset = if show_tab_bar { 1 } else { 0 };
-    let commands = growterm_render_cmd::generate_with_offset(&visible, cursor, preedit_str, sel_range, row_offset);
+    let commands = growterm_render_cmd::generate_with_offset(
+        &visible,
+        cursor,
+        preedit_str,
+        sel_range,
+        row_offset,
+        state.palette,
+    );
     drop(state);
 
     let tab_bar = if show_tab_bar {
@@ -455,7 +507,10 @@ mod tests {
 
     #[test]
     fn shell_escape_path_with_spaces() {
-        assert_eq!(shell_escape("/Users/me/my file.txt"), "'/Users/me/my file.txt'");
+        assert_eq!(
+            shell_escape("/Users/me/my file.txt"),
+            "'/Users/me/my file.txt'"
+        );
     }
 
     #[test]

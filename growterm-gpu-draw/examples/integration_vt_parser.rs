@@ -2,7 +2,7 @@
 /// Phase 4 (grid) + Phase 3 (vt-parser) + Phase 2 (render-cmd) + Phase 1 (gpu-draw) 파이프라인 검증
 use growterm_gpu_draw::GpuDrawer;
 use growterm_grid::Grid;
-use growterm_render_cmd::generate;
+use growterm_render_cmd::{generate, TerminalPalette};
 use growterm_types::Cell;
 use growterm_vt_parser::VtParser;
 use std::sync::Arc;
@@ -84,7 +84,8 @@ impl ApplicationHandler for App {
             }
             WindowEvent::RedrawRequested => {
                 if let Some(drawer) = &mut self.drawer {
-                    let commands = generate(&self.grid, None, None, None);
+                    let commands =
+                        generate(&self.grid, None, None, None, TerminalPalette::default());
                     drawer.draw(&commands, None, None);
                 }
             }

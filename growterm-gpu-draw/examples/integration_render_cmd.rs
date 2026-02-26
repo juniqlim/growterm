@@ -1,7 +1,7 @@
 /// Integration test: Cell → render-cmd::generate() → GpuDrawer::draw()
 /// Phase 0 (types) + Phase 2 (render-cmd) + Phase 1 (gpu-draw) 파이프라인 검증
 use growterm_gpu_draw::GpuDrawer;
-use growterm_render_cmd::generate;
+use growterm_render_cmd::{generate, TerminalPalette};
 use growterm_types::{Cell, CellFlags, Color, Rgb};
 use std::sync::Arc;
 use winit::application::ApplicationHandler;
@@ -13,21 +13,26 @@ fn build_grid() -> Vec<Vec<Cell>> {
     let mut grid = Vec::new();
 
     // Row 0: "Hello" in green RGB
-    let hello: Vec<Cell> = "Hello, growterm!".chars().map(|c| Cell {
-        character: c,
-        fg: Color::Rgb(Rgb::new(0, 200, 0)),
-        bg: Color::Rgb(Rgb::new(30, 30, 80)),
-        flags: CellFlags::empty(),
-    }).collect();
+    let hello: Vec<Cell> = "Hello, growterm!"
+        .chars()
+        .map(|c| Cell {
+            character: c,
+            fg: Color::Rgb(Rgb::new(0, 200, 0)),
+            bg: Color::Rgb(Rgb::new(30, 30, 80)),
+            flags: CellFlags::empty(),
+        })
+        .collect();
     grid.push(hello);
 
     // Row 1: ANSI indexed colors (0~7)
-    let ansi: Vec<Cell> = (0..8u8).map(|i| Cell {
-        character: (b'0' + i) as char,
-        fg: Color::Indexed(15), // bright white
-        bg: Color::Indexed(i),
-        flags: CellFlags::empty(),
-    }).collect();
+    let ansi: Vec<Cell> = (0..8u8)
+        .map(|i| Cell {
+            character: (b'0' + i) as char,
+            fg: Color::Indexed(15), // bright white
+            bg: Color::Indexed(i),
+            flags: CellFlags::empty(),
+        })
+        .collect();
     grid.push(ansi);
 
     // Row 2: Korean wide chars
@@ -38,27 +43,37 @@ fn build_grid() -> Vec<Vec<Cell>> {
             character: c,
             fg: Color::Indexed(1), // red
             bg: Color::Default,
-            flags: if wide { CellFlags::WIDE_CHAR } else { CellFlags::empty() },
+            flags: if wide {
+                CellFlags::WIDE_CHAR
+            } else {
+                CellFlags::empty()
+            },
         });
     }
     grid.push(korean_cells);
 
     // Row 3: INVERSE test
-    let inverse: Vec<Cell> = "INVERSE".chars().map(|c| Cell {
-        character: c,
-        fg: Color::Rgb(Rgb::new(255, 255, 255)),
-        bg: Color::Rgb(Rgb::new(0, 0, 0)),
-        flags: CellFlags::INVERSE,
-    }).collect();
+    let inverse: Vec<Cell> = "INVERSE"
+        .chars()
+        .map(|c| Cell {
+            character: c,
+            fg: Color::Rgb(Rgb::new(255, 255, 255)),
+            bg: Color::Rgb(Rgb::new(0, 0, 0)),
+            flags: CellFlags::INVERSE,
+        })
+        .collect();
     grid.push(inverse);
 
     // Row 4: DIM test
-    let dim: Vec<Cell> = "DIM TEXT".chars().map(|c| Cell {
-        character: c,
-        fg: Color::Rgb(Rgb::new(200, 200, 200)),
-        bg: Color::Default,
-        flags: CellFlags::DIM,
-    }).collect();
+    let dim: Vec<Cell> = "DIM TEXT"
+        .chars()
+        .map(|c| Cell {
+            character: c,
+            fg: Color::Rgb(Rgb::new(200, 200, 200)),
+            bg: Color::Default,
+            flags: CellFlags::DIM,
+        })
+        .collect();
     grid.push(dim);
 
     grid
@@ -99,7 +114,8 @@ impl ApplicationHandler for App {
             WindowEvent::RedrawRequested => {
                 if let Some(drawer) = &mut self.drawer {
                     // Integration pipeline: Cell → generate() → draw()
-                    let commands = generate(&self.grid, None, None, None);
+                    let commands =
+                        generate(&self.grid, None, None, None, TerminalPalette::default());
                     drawer.draw(&commands, None, None);
                 }
             }

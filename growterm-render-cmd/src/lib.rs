@@ -1,27 +1,83 @@
 use growterm_types::{Cell, CellFlags, Color, RenderCommand, Rgb};
 use unicode_width::UnicodeWidthChar;
 
-const DEFAULT_FG: Rgb = Rgb { r: 204, g: 204, b: 204 };
-const DEFAULT_BG: Rgb = Rgb { r: 0, g: 0, b: 0 };
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TerminalPalette {
+    pub default_fg: Rgb,
+    pub default_bg: Rgb,
+}
+
+impl TerminalPalette {
+    pub const DEFAULT: Self = Self {
+        default_fg: Rgb {
+            r: 204,
+            g: 204,
+            b: 204,
+        },
+        default_bg: Rgb { r: 0, g: 0, b: 0 },
+    };
+}
+
+impl Default for TerminalPalette {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
 
 // 256-color palette (indices 0..=255)
 const ANSI_COLORS: [Rgb; 16] = [
-    Rgb { r: 0, g: 0, b: 0 },         // 0  black
-    Rgb { r: 204, g: 0, b: 0 },       // 1  red
-    Rgb { r: 0, g: 204, b: 0 },       // 2  green
-    Rgb { r: 204, g: 204, b: 0 },     // 3  yellow
-    Rgb { r: 0, g: 0, b: 204 },       // 4  blue
-    Rgb { r: 204, g: 0, b: 204 },     // 5  magenta
-    Rgb { r: 0, g: 204, b: 204 },     // 6  cyan
-    Rgb { r: 204, g: 204, b: 204 },   // 7  white
-    Rgb { r: 128, g: 128, b: 128 },   // 8  bright black
-    Rgb { r: 255, g: 0, b: 0 },       // 9  bright red
-    Rgb { r: 0, g: 255, b: 0 },       // 10 bright green
-    Rgb { r: 255, g: 255, b: 0 },     // 11 bright yellow
-    Rgb { r: 0, g: 0, b: 255 },       // 12 bright blue
-    Rgb { r: 255, g: 0, b: 255 },     // 13 bright magenta
-    Rgb { r: 0, g: 255, b: 255 },     // 14 bright cyan
-    Rgb { r: 255, g: 255, b: 255 },   // 15 bright white
+    Rgb { r: 0, g: 0, b: 0 },   // 0  black
+    Rgb { r: 204, g: 0, b: 0 }, // 1  red
+    Rgb { r: 0, g: 204, b: 0 }, // 2  green
+    Rgb {
+        r: 204,
+        g: 204,
+        b: 0,
+    }, // 3  yellow
+    Rgb { r: 0, g: 0, b: 204 }, // 4  blue
+    Rgb {
+        r: 204,
+        g: 0,
+        b: 204,
+    }, // 5  magenta
+    Rgb {
+        r: 0,
+        g: 204,
+        b: 204,
+    }, // 6  cyan
+    Rgb {
+        r: 204,
+        g: 204,
+        b: 204,
+    }, // 7  white
+    Rgb {
+        r: 128,
+        g: 128,
+        b: 128,
+    }, // 8  bright black
+    Rgb { r: 255, g: 0, b: 0 }, // 9  bright red
+    Rgb { r: 0, g: 255, b: 0 }, // 10 bright green
+    Rgb {
+        r: 255,
+        g: 255,
+        b: 0,
+    }, // 11 bright yellow
+    Rgb { r: 0, g: 0, b: 255 }, // 12 bright blue
+    Rgb {
+        r: 255,
+        g: 0,
+        b: 255,
+    }, // 13 bright magenta
+    Rgb {
+        r: 0,
+        g: 255,
+        b: 255,
+    }, // 14 bright cyan
+    Rgb {
+        r: 255,
+        g: 255,
+        b: 255,
+    }, // 15 bright white
 ];
 
 fn resolve_color(color: Color, default: Rgb) -> Rgb {
@@ -53,8 +109,9 @@ pub fn generate(
     cursor_pos: Option<(u16, u16)>,
     preedit: Option<&str>,
     selection: Option<((u16, u16), (u16, u16))>,
+    palette: TerminalPalette,
 ) -> Vec<RenderCommand> {
-    generate_with_offset(cells, cursor_pos, preedit, selection, 0)
+    generate_with_offset(cells, cursor_pos, preedit, selection, 0, palette)
 }
 
 pub fn generate_with_offset(
@@ -63,6 +120,7 @@ pub fn generate_with_offset(
     preedit: Option<&str>,
     selection: Option<((u16, u16), (u16, u16))>,
     row_offset: u16,
+    palette: TerminalPalette,
 ) -> Vec<RenderCommand> {
     let mut commands = Vec::new();
     for (row, line) in cells.iter().enumerate() {
@@ -82,8 +140,8 @@ pub fn generate_with_offset(
             } else {
                 cell.fg
             };
-            let mut fg = resolve_color(fg_color, DEFAULT_FG);
-            let mut bg = resolve_color(cell.bg, DEFAULT_BG);
+            let mut fg = resolve_color(fg_color, palette.default_fg);
+            let mut bg = resolve_color(cell.bg, palette.default_bg);
 
             // Cursor: swap fg/bg at cursor position
             let is_cursor = cursor_pos == Some((row as u16, col as u16));
@@ -145,13 +203,17 @@ pub fn generate_with_offset(
         for ch in text.chars() {
             let width = ch.width().unwrap_or(1) as u16;
             let flags = CellFlags::UNDERLINE
-                | if width > 1 { CellFlags::WIDE_CHAR } else { CellFlags::empty() };
+                | if width > 1 {
+                    CellFlags::WIDE_CHAR
+                } else {
+                    CellFlags::empty()
+                };
             commands.push(RenderCommand {
                 col,
                 row: cursor_row + row_offset,
                 character: ch,
-                fg: DEFAULT_BG,
-                bg: DEFAULT_FG,
+                fg: palette.default_bg,
+                bg: palette.default_fg,
                 flags,
             });
             col += width;
@@ -164,6 +226,24 @@ pub fn generate_with_offset(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const DEFAULT_FG: Rgb = TerminalPalette::DEFAULT.default_fg;
+    const DEFAULT_BG: Rgb = TerminalPalette::DEFAULT.default_bg;
+
+    fn generate(
+        cells: &[Vec<Cell>],
+        cursor_pos: Option<(u16, u16)>,
+        preedit: Option<&str>,
+        selection: Option<((u16, u16), (u16, u16))>,
+    ) -> Vec<RenderCommand> {
+        super::generate(
+            cells,
+            cursor_pos,
+            preedit,
+            selection,
+            TerminalPalette::default(),
+        )
+    }
 
     #[test]
     fn empty_grid_produces_no_commands() {
@@ -304,9 +384,18 @@ mod tests {
     #[test]
     fn multiple_rows() {
         let cells = vec![
-            vec![Cell { character: 'A', ..Cell::default() }],
-            vec![Cell { character: 'B', ..Cell::default() }],
-            vec![Cell { character: 'C', ..Cell::default() }],
+            vec![Cell {
+                character: 'A',
+                ..Cell::default()
+            }],
+            vec![Cell {
+                character: 'B',
+                ..Cell::default()
+            }],
+            vec![Cell {
+                character: 'C',
+                ..Cell::default()
+            }],
         ];
         let cmds = generate(&cells, None, None, None);
         assert_eq!(cmds.len(), 3);
@@ -333,8 +422,14 @@ mod tests {
     #[test]
     fn cursor_pos_only_affects_cursor_cell() {
         let cells = vec![vec![
-            Cell { character: 'A', ..Cell::default() },
-            Cell { character: 'B', ..Cell::default() },
+            Cell {
+                character: 'A',
+                ..Cell::default()
+            },
+            Cell {
+                character: 'B',
+                ..Cell::default()
+            },
         ]];
         let cmds = generate(&cells, Some((0, 0)), None, None);
         // Cell at cursor: swapped
@@ -424,8 +519,14 @@ mod tests {
     #[test]
     fn cursor_on_second_row() {
         let cells = vec![
-            vec![Cell { character: 'A', ..Cell::default() }],
-            vec![Cell { character: 'B', ..Cell::default() }],
+            vec![Cell {
+                character: 'A',
+                ..Cell::default()
+            }],
+            vec![Cell {
+                character: 'B',
+                ..Cell::default()
+            }],
         ];
         let cmds = generate(&cells, Some((1, 0)), None, None);
         // Row 0: normal
@@ -504,7 +605,7 @@ mod tests {
         ]];
         let cmds = generate(&cells, Some((0, 0)), Some("ha"), None);
         let base_count = 5; // 5 grid cells
-        // 'h' at col 0, 'a' at col 1
+                            // 'h' at col 0, 'a' at col 1
         assert_eq!(cmds[base_count].col, 0);
         assert_eq!(cmds[base_count].character, 'h');
         assert_eq!(cmds[base_count + 1].col, 1);
@@ -575,9 +676,18 @@ mod tests {
     #[test]
     fn selection_swaps_fg_bg() {
         let cells = vec![vec![
-            Cell { character: 'A', ..Cell::default() },
-            Cell { character: 'B', ..Cell::default() },
-            Cell { character: 'C', ..Cell::default() },
+            Cell {
+                character: 'A',
+                ..Cell::default()
+            },
+            Cell {
+                character: 'B',
+                ..Cell::default()
+            },
+            Cell {
+                character: 'C',
+                ..Cell::default()
+            },
         ]];
         let sel = Some(((0, 0), (0, 1)));
         let cmds = generate(&cells, None, None, sel);
@@ -594,8 +704,26 @@ mod tests {
     #[test]
     fn selection_multi_row() {
         let cells = vec![
-            vec![Cell { character: 'A', ..Cell::default() }, Cell { character: 'B', ..Cell::default() }],
-            vec![Cell { character: 'C', ..Cell::default() }, Cell { character: 'D', ..Cell::default() }],
+            vec![
+                Cell {
+                    character: 'A',
+                    ..Cell::default()
+                },
+                Cell {
+                    character: 'B',
+                    ..Cell::default()
+                },
+            ],
+            vec![
+                Cell {
+                    character: 'C',
+                    ..Cell::default()
+                },
+                Cell {
+                    character: 'D',
+                    ..Cell::default()
+                },
+            ],
         ];
         let sel = Some(((0, 1), (1, 0)));
         let cmds = generate(&cells, None, None, sel);
@@ -615,5 +743,22 @@ mod tests {
         let cmds = generate(&cells, None, None, None);
         assert_eq!(cmds[0].fg, DEFAULT_FG);
         assert_eq!(cmds[0].bg, DEFAULT_BG);
+    }
+
+    #[test]
+    fn default_color_uses_injected_palette() {
+        let palette = TerminalPalette {
+            default_fg: Rgb::new(12, 34, 56),
+            default_bg: Rgb::new(65, 43, 21),
+        };
+        let cell = Cell {
+            character: 'D',
+            fg: Color::Default,
+            bg: Color::Default,
+            flags: CellFlags::empty(),
+        };
+        let cmds = super::generate(&vec![vec![cell]], None, None, None, palette);
+        assert_eq!(cmds[0].fg, Rgb::new(12, 34, 56));
+        assert_eq!(cmds[0].bg, Rgb::new(65, 43, 21));
     }
 }

@@ -5,6 +5,8 @@ use std::sync::{Arc, Mutex};
 use growterm_grid::Grid;
 use growterm_macos::MacWindow;
 use growterm_pty::PtyWriter;
+use growterm_render_cmd::TerminalPalette;
+use growterm_types::Rgb;
 use growterm_vt_parser::VtParser;
 
 pub struct Tab {
@@ -16,6 +18,7 @@ pub struct Tab {
 pub struct TerminalState {
     pub grid: Grid,
     pub vt_parser: VtParser,
+    pub palette: TerminalPalette,
 }
 
 pub struct TabManager {
@@ -129,13 +132,23 @@ impl TabManager {
 
     /// Y pixel offset for mouse events (tab bar height or 0).
     pub fn mouse_y_offset(&self, cell_h: f32) -> f32 {
-        if self.show_tab_bar() { cell_h } else { 0.0 }
+        if self.show_tab_bar() {
+            cell_h
+        } else {
+            0.0
+        }
     }
 
     pub fn tab_bar_info(&self) -> TabBarInfo {
         TabBarInfo {
             titles: (1..=self.tabs.len())
-                .map(|i| if i <= 9 { format!("⌘{}", i) } else { format!("{}", i) })
+                .map(|i| {
+                    if i <= 9 {
+                        format!("⌘{}", i)
+                    } else {
+                        format!("{}", i)
+                    }
+                })
                 .collect(),
             active_index: self.active,
         }
@@ -143,14 +156,14 @@ impl TabManager {
 }
 
 impl Tab {
-    pub fn spawn(
-        rows: u16,
-        cols: u16,
-        window: Arc<MacWindow>,
-    ) -> Result<Self, std::io::Error> {
+    pub fn spawn(rows: u16, cols: u16, window: Arc<MacWindow>) -> Result<Self, std::io::Error> {
         let grid = Grid::new(cols, rows);
         let vt_parser = VtParser::new();
-        let terminal = Arc::new(Mutex::new(TerminalState { grid, vt_parser }));
+        let terminal = Arc::new(Mutex::new(TerminalState {
+            grid,
+            vt_parser,
+            palette: TerminalPalette::default(),
+        }));
         let dirty = Arc::new(AtomicBool::new(false));
 
         let pty_writer = match growterm_pty::spawn(rows, cols) {
@@ -195,6 +208,7 @@ fn start_io_thread(
                     pending_queries.extend_from_slice(&buf[..n]);
                     let controls = extract_terminal_controls(&mut pending_queries);
 
+                    let mut responses = Vec::new();
                     let mut state = terminal.lock().unwrap();
                     let commands = state.vt_parser.parse(&buf[..n]);
                     for cmd in &commands {
@@ -204,8 +218,6 @@ fn start_io_thread(
                         state.grid.reset_scroll();
                     }
                     let cursor = state.grid.cursor_pos();
-                    drop(state);
-
                     for control in controls {
                         match control {
                             TerminalControl::Query(query) => {
@@ -213,8 +225,9 @@ fn start_io_thread(
                                     query,
                                     cursor,
                                     kitty_keyboard_flags,
+                                    state.palette,
                                 );
-                                let _ = responder.write_all_flush(response.as_bytes());
+                                responses.push(response);
                             }
                             TerminalControl::KittyKeyboardPush(flags) => {
                                 kitty_keyboard_stack.push(kitty_keyboard_flags);
@@ -232,7 +245,18 @@ fn start_io_thread(
                                     remaining -= 1;
                                 }
                             }
+                            TerminalControl::SetDefaultForegroundColor(color) => {
+                                state.palette.default_fg = color;
+                            }
+                            TerminalControl::SetDefaultBackgroundColor(color) => {
+                                state.palette.default_bg = color;
+                            }
                         }
+                    }
+                    drop(state);
+
+                    for response in responses {
+                        let _ = responder.write_all_flush(response.as_bytes());
                     }
 
                     dirty.store(true, Ordering::Relaxed);
@@ -266,6 +290,8 @@ enum TerminalControl {
     Query(TerminalQuery),
     KittyKeyboardPush(u16),
     KittyKeyboardPop(u16),
+    SetDefaultForegroundColor(Rgb),
+    SetDefaultBackgroundColor(Rgb),
 }
 
 fn extract_terminal_controls(pending: &mut Vec<u8>) -> Vec<TerminalControl> {
@@ -291,17 +317,23 @@ fn extract_terminal_controls(pending: &mut Vec<u8>) -> Vec<TerminalControl> {
             continue;
         }
         if rest.starts_with(b"\x1b[c") {
-            controls.push(TerminalControl::Query(TerminalQuery::PrimaryDeviceAttributes));
+            controls.push(TerminalControl::Query(
+                TerminalQuery::PrimaryDeviceAttributes,
+            ));
             i += 3;
             continue;
         }
         if rest.starts_with(b"\x1b[>c") {
-            controls.push(TerminalControl::Query(TerminalQuery::SecondaryDeviceAttributes));
+            controls.push(TerminalControl::Query(
+                TerminalQuery::SecondaryDeviceAttributes,
+            ));
             i += 4;
             continue;
         }
         if rest.starts_with(b"\x1b[>0c") {
-            controls.push(TerminalControl::Query(TerminalQuery::SecondaryDeviceAttributes));
+            controls.push(TerminalControl::Query(
+                TerminalQuery::SecondaryDeviceAttributes,
+            ));
             i += 5;
             continue;
         }
@@ -326,9 +358,32 @@ fn extract_terminal_controls(pending: &mut Vec<u8>) -> Vec<TerminalControl> {
             continue;
         }
         if rest.starts_with(b"\x1bP$qm\x1b\\") {
-            controls.push(TerminalControl::Query(TerminalQuery::RequestStatusStringSgr));
+            controls.push(TerminalControl::Query(
+                TerminalQuery::RequestStatusStringSgr,
+            ));
             i += 7;
             continue;
+        }
+        if rest.starts_with(b"\x1b]10;") || rest.starts_with(b"\x1b]11;") {
+            match parse_osc_default_color_control(rest) {
+                SequenceParse::Matched(control, consumed) => {
+                    controls.push(control);
+                    i += consumed;
+                    continue;
+                }
+                SequenceParse::NeedMore => {
+                    keep_from = Some(i);
+                    break;
+                }
+                SequenceParse::NoMatch => {
+                    if let Some(consumed) = osc_sequence_len(rest) {
+                        i += consumed;
+                        continue;
+                    }
+                    keep_from = Some(i);
+                    break;
+                }
+            }
         }
 
         match parse_kitty_keyboard_control(rest) {
@@ -374,8 +429,10 @@ fn is_known_control_prefix(rest: &[u8]) -> bool {
         b"\x1b]11;?\x07".as_slice(),
         b"\x1bP$qm\x1b\\".as_slice(),
     ]
-        .iter()
-        .any(|pat| pat.starts_with(rest))
+    .iter()
+    .any(|pat| pat.starts_with(rest))
+        || b"\x1b]10;".starts_with(rest)
+        || b"\x1b]11;".starts_with(rest)
         || is_kitty_keyboard_control_prefix(rest)
 }
 
@@ -447,6 +504,102 @@ fn is_kitty_keyboard_control_prefix(rest: &[u8]) -> bool {
         .all(|byte| byte.is_ascii_digit() || *byte == b'u')
 }
 
+fn parse_osc_default_color_control(rest: &[u8]) -> SequenceParse<TerminalControl> {
+    let prefix = if rest.starts_with(b"\x1b]10;") {
+        (5usize, true)
+    } else if rest.starts_with(b"\x1b]11;") {
+        (5usize, false)
+    } else {
+        return SequenceParse::NoMatch;
+    };
+
+    let (payload_start, is_foreground) = prefix;
+    if rest.len() <= payload_start {
+        return SequenceParse::NeedMore;
+    }
+
+    let Some((terminator_index, terminator_len)) = find_osc_terminator(rest) else {
+        return SequenceParse::NeedMore;
+    };
+    let payload = &rest[payload_start..terminator_index];
+    let Some(color) = parse_osc_color(payload) else {
+        return SequenceParse::NoMatch;
+    };
+
+    let control = if is_foreground {
+        TerminalControl::SetDefaultForegroundColor(color)
+    } else {
+        TerminalControl::SetDefaultBackgroundColor(color)
+    };
+    SequenceParse::Matched(control, terminator_index + terminator_len)
+}
+
+fn osc_sequence_len(rest: &[u8]) -> Option<usize> {
+    find_osc_terminator(rest)
+        .map(|(terminator_index, terminator_len)| terminator_index + terminator_len)
+}
+
+fn find_osc_terminator(rest: &[u8]) -> Option<(usize, usize)> {
+    let mut idx = 0usize;
+    while idx < rest.len() {
+        match rest[idx] {
+            0x07 => return Some((idx, 1)),
+            0x1b => {
+                if idx + 1 >= rest.len() {
+                    return None;
+                }
+                if rest[idx + 1] == b'\\' {
+                    return Some((idx, 2));
+                }
+            }
+            _ => {}
+        }
+        idx += 1;
+    }
+    None
+}
+
+fn parse_osc_color(payload: &[u8]) -> Option<Rgb> {
+    let text = std::str::from_utf8(payload).ok()?.trim();
+    if let Some(rgb) = text.strip_prefix("rgb:") {
+        let parts: Vec<&str> = rgb.split('/').collect();
+        if parts.len() != 3 {
+            return None;
+        }
+        return Some(Rgb::new(
+            parse_scaled_hex(parts[0])?,
+            parse_scaled_hex(parts[1])?,
+            parse_scaled_hex(parts[2])?,
+        ));
+    }
+
+    if let Some(hex) = text.strip_prefix('#') {
+        if hex.is_empty() || hex.len() % 3 != 0 {
+            return None;
+        }
+        let comp_len = hex.len() / 3;
+        if comp_len == 0 || comp_len > 4 {
+            return None;
+        }
+        return Some(Rgb::new(
+            parse_scaled_hex(&hex[..comp_len])?,
+            parse_scaled_hex(&hex[comp_len..comp_len * 2])?,
+            parse_scaled_hex(&hex[comp_len * 2..])?,
+        ));
+    }
+
+    None
+}
+
+fn parse_scaled_hex(hex: &str) -> Option<u8> {
+    if hex.is_empty() || hex.len() > 4 {
+        return None;
+    }
+    let value = u16::from_str_radix(hex, 16).ok()? as u32;
+    let max = (1u32 << (hex.len() * 4)) - 1;
+    Some(((value * 255 + (max / 2)) / max) as u8)
+}
+
 fn parse_u16_saturating(bytes: &[u8]) -> u16 {
     std::str::from_utf8(bytes)
         .ok()
@@ -459,6 +612,7 @@ fn encode_terminal_query_response(
     query: TerminalQuery,
     cursor: (u16, u16),
     kitty_keyboard_flags: u16,
+    palette: TerminalPalette,
 ) -> String {
     match query {
         TerminalQuery::CursorPositionReport => {
@@ -469,15 +623,34 @@ fn encode_terminal_query_response(
         TerminalQuery::PrimaryDeviceAttributes => "\x1b[?1;2c".to_string(),
         TerminalQuery::SecondaryDeviceAttributes => "\x1b[>0;95;0c".to_string(),
         TerminalQuery::KittyKeyboardQuery => format!("\x1b[?{kitty_keyboard_flags}u"),
-        TerminalQuery::ForegroundColorQuery => "\x1b]10;rgb:ffff/ffff/ffff\x07".to_string(),
-        TerminalQuery::BackgroundColorQuery => "\x1b]11;rgb:0000/0000/0000\x07".to_string(),
+        TerminalQuery::ForegroundColorQuery => {
+            encode_osc_color_query_response(10, palette.default_fg)
+        }
+        TerminalQuery::BackgroundColorQuery => {
+            encode_osc_color_query_response(11, palette.default_bg)
+        }
         TerminalQuery::RequestStatusStringSgr => "\x1bP1$r0m\x1b\\".to_string(),
     }
+}
+
+fn encode_osc_color_query_response(code: u8, color: Rgb) -> String {
+    let r = (color.r as u16) * 0x101;
+    let g = (color.g as u16) * 0x101;
+    let b = (color.b as u16) * 0x101;
+    format!("\x1b]{code};rgb:{r:04x}/{g:04x}/{b:04x}\x07")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use growterm_render_cmd::TerminalPalette;
+
+    fn test_palette() -> TerminalPalette {
+        TerminalPalette {
+            default_fg: growterm_types::Rgb::new(0x12, 0x34, 0x56),
+            default_bg: growterm_types::Rgb::new(0x9a, 0xbc, 0xde),
+        }
+    }
 
     #[test]
     fn new_manager_is_empty() {
@@ -490,7 +663,11 @@ mod tests {
     fn dummy_tab() -> Tab {
         let grid = Grid::new(80, 24);
         let vt_parser = VtParser::new();
-        let terminal = Arc::new(Mutex::new(TerminalState { grid, vt_parser }));
+        let terminal = Arc::new(Mutex::new(TerminalState {
+            grid,
+            vt_parser,
+            palette: TerminalPalette::default(),
+        }));
         let dirty = Arc::new(AtomicBool::new(false));
         // We can't create a real PtyWriter without spawning, so we test TabManager logic
         // separately. For unit tests we'll test TabManager methods that don't need PtyWriter.
@@ -666,7 +843,9 @@ mod tests {
         let controls = extract_terminal_controls(&mut pending);
         assert_eq!(
             controls,
-            vec![TerminalControl::Query(TerminalQuery::RequestStatusStringSgr)]
+            vec![TerminalControl::Query(
+                TerminalQuery::RequestStatusStringSgr
+            )]
         );
         assert!(pending.is_empty());
     }
@@ -681,22 +860,55 @@ mod tests {
 
     #[test]
     fn kitty_keyboard_query_response_uses_runtime_flags() {
-        let response = encode_terminal_query_response(TerminalQuery::KittyKeyboardQuery, (0, 0), 7);
+        let response = encode_terminal_query_response(
+            TerminalQuery::KittyKeyboardQuery,
+            (0, 0),
+            7,
+            test_palette(),
+        );
         assert_eq!(response, "\x1b[?7u");
     }
 
     #[test]
     fn osc_query_responses_use_bel_terminator() {
-        let fg = encode_terminal_query_response(TerminalQuery::ForegroundColorQuery, (0, 0), 0);
-        let bg = encode_terminal_query_response(TerminalQuery::BackgroundColorQuery, (0, 0), 0);
-        assert_eq!(fg, "\x1b]10;rgb:ffff/ffff/ffff\x07");
-        assert_eq!(bg, "\x1b]11;rgb:0000/0000/0000\x07");
+        let fg = encode_terminal_query_response(
+            TerminalQuery::ForegroundColorQuery,
+            (0, 0),
+            0,
+            test_palette(),
+        );
+        let bg = encode_terminal_query_response(
+            TerminalQuery::BackgroundColorQuery,
+            (0, 0),
+            0,
+            test_palette(),
+        );
+        assert_eq!(fg, "\x1b]10;rgb:1212/3434/5656\x07");
+        assert_eq!(bg, "\x1b]11;rgb:9a9a/bcbc/dede\x07");
     }
 
     #[test]
     fn decrqss_sgr_response_is_supported() {
-        let response =
-            encode_terminal_query_response(TerminalQuery::RequestStatusStringSgr, (0, 0), 0);
+        let response = encode_terminal_query_response(
+            TerminalQuery::RequestStatusStringSgr,
+            (0, 0),
+            0,
+            test_palette(),
+        );
         assert_eq!(response, "\x1bP1$r0m\x1b\\");
+    }
+
+    #[test]
+    fn extract_terminal_controls_detects_osc_color_set_sequences() {
+        let mut pending = b"\x1b]10;rgb:ffff/0000/0000\x07\x1b]11;#112233\x1b\\".to_vec();
+        let controls = extract_terminal_controls(&mut pending);
+        assert_eq!(
+            controls,
+            vec![
+                TerminalControl::SetDefaultForegroundColor(growterm_types::Rgb::new(255, 0, 0)),
+                TerminalControl::SetDefaultBackgroundColor(growterm_types::Rgb::new(17, 34, 51)),
+            ]
+        );
+        assert!(pending.is_empty());
     }
 }
