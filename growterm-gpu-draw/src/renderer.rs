@@ -71,7 +71,11 @@ pub struct TabBarInfo {
 impl GpuDrawer {
     pub fn new<W>(window: std::sync::Arc<W>, width: u32, height: u32, font_size: f32) -> Self
     where
-        W: raw_window_handle::HasWindowHandle + raw_window_handle::HasDisplayHandle + Send + Sync + 'static,
+        W: raw_window_handle::HasWindowHandle
+            + raw_window_handle::HasDisplayHandle
+            + Send
+            + Sync
+            + 'static,
     {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
@@ -360,15 +364,24 @@ impl GpuDrawer {
         self.atlas.cell_size()
     }
 
-    pub fn draw(&mut self, commands: &[RenderCommand], scrollbar: Option<(f32, f32)>, tab_bar: Option<&TabBarInfo>) {
+    pub fn draw(
+        &mut self,
+        commands: &[RenderCommand],
+        scrollbar: Option<(f32, f32)>,
+        tab_bar: Option<&TabBarInfo>,
+    ) {
         if self.surface_dirty {
             self.surface_dirty = false;
             self.surface.configure(&self.device, &self.surface_config);
             let uniforms = Uniforms {
-                screen_size: [self.surface_config.width as f32, self.surface_config.height as f32],
+                screen_size: [
+                    self.surface_config.width as f32,
+                    self.surface_config.height as f32,
+                ],
                 _padding: [0.0; 2],
             };
-            self.queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
+            self.queue
+                .write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
         }
         let output = match self.surface.get_current_texture() {
             Ok(t) => t,
@@ -386,29 +399,47 @@ impl GpuDrawer {
         for cmd in commands {
             let x = cmd.col as f32 * cell_w;
             let y = cmd.row as f32 * cell_h;
-            let w = if cmd.flags.contains(CellFlags::WIDE_CHAR) { cell_w * 2.0 } else { cell_w };
+            let w = if cmd.flags.contains(CellFlags::WIDE_CHAR) {
+                cell_w * 2.0
+            } else {
+                cell_w
+            };
             let color = rgb_to_f32(cmd.bg);
 
-            bg_vertices.push(BgVertex { position: [x, y], color });
-            bg_vertices.push(BgVertex { position: [x + w, y], color });
-            bg_vertices.push(BgVertex { position: [x, y + cell_h], color });
-            bg_vertices.push(BgVertex { position: [x + w, y], color });
-            bg_vertices.push(BgVertex { position: [x + w, y + cell_h], color });
-            bg_vertices.push(BgVertex { position: [x, y + cell_h], color });
+            bg_vertices.push(BgVertex {
+                position: [x, y],
+                color,
+            });
+            bg_vertices.push(BgVertex {
+                position: [x + w, y],
+                color,
+            });
+            bg_vertices.push(BgVertex {
+                position: [x, y + cell_h],
+                color,
+            });
+            bg_vertices.push(BgVertex {
+                position: [x + w, y],
+                color,
+            });
+            bg_vertices.push(BgVertex {
+                position: [x + w, y + cell_h],
+                color,
+            });
+            bg_vertices.push(BgVertex {
+                position: [x, y + cell_h],
+                color,
+            });
         }
 
         // Build glyph vertices
         let mut glyph_vertices: Vec<GlyphVertex> = Vec::new();
 
         // Helper: push a fg-colored rectangle into bg_vertices
-        let push_rect = |bg_verts: &mut Vec<BgVertex>, x: f32, y: f32, w: f32, h: f32, color: [f32; 3]| {
-            bg_verts.push(BgVertex { position: [x, y], color });
-            bg_verts.push(BgVertex { position: [x + w, y], color });
-            bg_verts.push(BgVertex { position: [x, y + h], color });
-            bg_verts.push(BgVertex { position: [x + w, y], color });
-            bg_verts.push(BgVertex { position: [x + w, y + h], color });
-            bg_verts.push(BgVertex { position: [x, y + h], color });
-        };
+        let push_rect =
+            |bg_verts: &mut Vec<BgVertex>, x: f32, y: f32, w: f32, h: f32, color: [f32; 3]| {
+                push_bg_rect(bg_verts, x, y, w, h, color);
+            };
 
         for cmd in commands {
             if cmd.character == ' ' {
@@ -424,46 +455,9 @@ impl GpuDrawer {
                 let cx = cmd.col as f32 * cell_w;
                 let cy = cmd.row as f32 * cell_h;
                 let fg = rgb_to_f32(cmd.fg);
-                let hw = cell_w / 2.0;
-                let hh = cell_h / 2.0;
-
-                match ch {
-                    '\u{2588}' => push_rect(&mut bg_vertices, cx, cy, cell_w, cell_h, fg),         // █
-                    '\u{2580}' => push_rect(&mut bg_vertices, cx, cy, cell_w, hh, fg),              // ▀
-                    '\u{2584}' => push_rect(&mut bg_vertices, cx, cy + hh, cell_w, hh, fg),         // ▄
-                    '\u{258C}' => push_rect(&mut bg_vertices, cx, cy, hw, cell_h, fg),              // ▌
-                    '\u{2590}' => push_rect(&mut bg_vertices, cx + hw, cy, hw, cell_h, fg),         // ▐
-                    '\u{259B}' => { // ▛ upper half + lower-left
-                        push_rect(&mut bg_vertices, cx, cy, cell_w, hh, fg);
-                        push_rect(&mut bg_vertices, cx, cy + hh, hw, hh, fg);
-                    }
-                    '\u{259C}' => { // ▜ upper half + lower-right
-                        push_rect(&mut bg_vertices, cx, cy, cell_w, hh, fg);
-                        push_rect(&mut bg_vertices, cx + hw, cy + hh, hw, hh, fg);
-                    }
-                    '\u{2599}' => { // ▙ lower half + upper-left
-                        push_rect(&mut bg_vertices, cx, cy, hw, hh, fg);
-                        push_rect(&mut bg_vertices, cx, cy + hh, cell_w, hh, fg);
-                    }
-                    '\u{259F}' => { // ▟ lower half + upper-right
-                        push_rect(&mut bg_vertices, cx + hw, cy, hw, hh, fg);
-                        push_rect(&mut bg_vertices, cx, cy + hh, cell_w, hh, fg);
-                    }
-                    '\u{2598}' => push_rect(&mut bg_vertices, cx, cy, hw, hh, fg),                 // ▘
-                    '\u{259D}' => push_rect(&mut bg_vertices, cx + hw, cy, hw, hh, fg),             // ▝
-                    '\u{2596}' => push_rect(&mut bg_vertices, cx, cy + hh, hw, hh, fg),             // ▖
-                    '\u{2597}' => push_rect(&mut bg_vertices, cx + hw, cy + hh, hw, hh, fg),        // ▗
-                    '\u{259A}' => { // ▚ upper-left + lower-right
-                        push_rect(&mut bg_vertices, cx, cy, hw, hh, fg);
-                        push_rect(&mut bg_vertices, cx + hw, cy + hh, hw, hh, fg);
-                    }
-                    '\u{259E}' => { // ▞ upper-right + lower-left
-                        push_rect(&mut bg_vertices, cx + hw, cy, hw, hh, fg);
-                        push_rect(&mut bg_vertices, cx, cy + hh, hw, hh, fg);
-                    }
-                    _ => {} // other chars in range (U+2585-U+2587, U+2589-U+258B, U+258D-U+258F, U+2594-U+2595)
+                if push_block_element_rects(&mut bg_vertices, ch, cx, cy, cell_w, cell_h, fg) {
+                    continue;
                 }
-                continue;
             }
 
             // Box drawing characters (U+2500..U+257F)
@@ -481,17 +475,55 @@ impl GpuDrawer {
 
                     // Horizontal segment
                     if segs.h_weight != LineWeight::None && segs.h_weight != LineWeight::Double {
-                        let th = if segs.h_weight == LineWeight::Heavy { heavy_h } else { light_h };
-                        let x0 = if segs.left { 0.0 } else { mid_x - (th / 2.0).floor() };
-                        let x1 = if segs.right { cell_w } else { mid_x + (th / 2.0).ceil() };
-                        push_rect(&mut bg_vertices, cx + x0, cy + mid_y - (th / 2.0).floor(), x1 - x0, th, fg);
+                        let th = if segs.h_weight == LineWeight::Heavy {
+                            heavy_h
+                        } else {
+                            light_h
+                        };
+                        let x0 = if segs.left {
+                            0.0
+                        } else {
+                            mid_x - (th / 2.0).floor()
+                        };
+                        let x1 = if segs.right {
+                            cell_w
+                        } else {
+                            mid_x + (th / 2.0).ceil()
+                        };
+                        push_rect(
+                            &mut bg_vertices,
+                            cx + x0,
+                            cy + mid_y - (th / 2.0).floor(),
+                            x1 - x0,
+                            th,
+                            fg,
+                        );
                     }
                     // Vertical segment
                     if segs.v_weight != LineWeight::None && segs.v_weight != LineWeight::Double {
-                        let tw = if segs.v_weight == LineWeight::Heavy { heavy_w } else { light_w };
-                        let y0 = if segs.up { 0.0 } else { mid_y - (tw / 2.0).floor() };
-                        let y1 = if segs.down { cell_h } else { mid_y + (tw / 2.0).ceil() };
-                        push_rect(&mut bg_vertices, cx + mid_x - (tw / 2.0).floor(), cy + y0, tw, y1 - y0, fg);
+                        let tw = if segs.v_weight == LineWeight::Heavy {
+                            heavy_w
+                        } else {
+                            light_w
+                        };
+                        let y0 = if segs.up {
+                            0.0
+                        } else {
+                            mid_y - (tw / 2.0).floor()
+                        };
+                        let y1 = if segs.down {
+                            cell_h
+                        } else {
+                            mid_y + (tw / 2.0).ceil()
+                        };
+                        push_rect(
+                            &mut bg_vertices,
+                            cx + mid_x - (tw / 2.0).floor(),
+                            cy + y0,
+                            tw,
+                            y1 - y0,
+                            fg,
+                        );
                     }
                     // Double horizontal
                     if segs.h_weight == LineWeight::Double {
@@ -499,8 +531,22 @@ impl GpuDrawer {
                         let th = light_h;
                         let x0 = if segs.left { 0.0 } else { mid_x };
                         let x1 = if segs.right { cell_w } else { mid_x + light_w };
-                        push_rect(&mut bg_vertices, cx + x0, cy + mid_y - gap - th / 2.0, x1 - x0, th, fg);
-                        push_rect(&mut bg_vertices, cx + x0, cy + mid_y + gap - th / 2.0, x1 - x0, th, fg);
+                        push_rect(
+                            &mut bg_vertices,
+                            cx + x0,
+                            cy + mid_y - gap - th / 2.0,
+                            x1 - x0,
+                            th,
+                            fg,
+                        );
+                        push_rect(
+                            &mut bg_vertices,
+                            cx + x0,
+                            cy + mid_y + gap - th / 2.0,
+                            x1 - x0,
+                            th,
+                            fg,
+                        );
                     }
                     // Double vertical
                     if segs.v_weight == LineWeight::Double {
@@ -508,8 +554,22 @@ impl GpuDrawer {
                         let tw = light_w;
                         let y0 = if segs.up { 0.0 } else { mid_y };
                         let y1 = if segs.down { cell_h } else { mid_y + light_h };
-                        push_rect(&mut bg_vertices, cx + mid_x - gap - tw / 2.0, cy + y0, tw, y1 - y0, fg);
-                        push_rect(&mut bg_vertices, cx + mid_x + gap - tw / 2.0, cy + y0, tw, y1 - y0, fg);
+                        push_rect(
+                            &mut bg_vertices,
+                            cx + mid_x - gap - tw / 2.0,
+                            cy + y0,
+                            tw,
+                            y1 - y0,
+                            fg,
+                        );
+                        push_rect(
+                            &mut bg_vertices,
+                            cx + mid_x + gap - tw / 2.0,
+                            cy + y0,
+                            tw,
+                            y1 - y0,
+                            fg,
+                        );
                     }
                     continue;
                 }
@@ -532,12 +592,36 @@ impl GpuDrawer {
 
             let color = rgb_to_f32(cmd.fg);
 
-            glyph_vertices.push(GlyphVertex { position: [gx, gy], tex_coords: [region.u0, region.v0], color });
-            glyph_vertices.push(GlyphVertex { position: [gx + gw, gy], tex_coords: [region.u1, region.v0], color });
-            glyph_vertices.push(GlyphVertex { position: [gx, gy + gh], tex_coords: [region.u0, region.v1], color });
-            glyph_vertices.push(GlyphVertex { position: [gx + gw, gy], tex_coords: [region.u1, region.v0], color });
-            glyph_vertices.push(GlyphVertex { position: [gx + gw, gy + gh], tex_coords: [region.u1, region.v1], color });
-            glyph_vertices.push(GlyphVertex { position: [gx, gy + gh], tex_coords: [region.u0, region.v1], color });
+            glyph_vertices.push(GlyphVertex {
+                position: [gx, gy],
+                tex_coords: [region.u0, region.v0],
+                color,
+            });
+            glyph_vertices.push(GlyphVertex {
+                position: [gx + gw, gy],
+                tex_coords: [region.u1, region.v0],
+                color,
+            });
+            glyph_vertices.push(GlyphVertex {
+                position: [gx, gy + gh],
+                tex_coords: [region.u0, region.v1],
+                color,
+            });
+            glyph_vertices.push(GlyphVertex {
+                position: [gx + gw, gy],
+                tex_coords: [region.u1, region.v0],
+                color,
+            });
+            glyph_vertices.push(GlyphVertex {
+                position: [gx + gw, gy + gh],
+                tex_coords: [region.u1, region.v1],
+                color,
+            });
+            glyph_vertices.push(GlyphVertex {
+                position: [gx, gy + gh],
+                tex_coords: [region.u0, region.v1],
+                color,
+            });
         }
 
         // Scrollbar
@@ -565,7 +649,6 @@ impl GpuDrawer {
             let tab_w = screen_w / tab_count;
             let mut x = 0.0_f32;
             for (i, title) in tab_info.titles.iter().enumerate() {
-
                 if i == tab_info.active_index {
                     push_rect(&mut bg_vertices, x, 0.0, tab_w, bar_h, active_bg);
                 }
@@ -589,12 +672,36 @@ impl GpuDrawer {
                         } else {
                             [0.6, 0.6, 0.6]
                         };
-                        glyph_vertices.push(GlyphVertex { position: [gx, gy], tex_coords: [region.u0, region.v0], color });
-                        glyph_vertices.push(GlyphVertex { position: [gx + gw, gy], tex_coords: [region.u1, region.v0], color });
-                        glyph_vertices.push(GlyphVertex { position: [gx, gy + gh], tex_coords: [region.u0, region.v1], color });
-                        glyph_vertices.push(GlyphVertex { position: [gx + gw, gy], tex_coords: [region.u1, region.v0], color });
-                        glyph_vertices.push(GlyphVertex { position: [gx + gw, gy + gh], tex_coords: [region.u1, region.v1], color });
-                        glyph_vertices.push(GlyphVertex { position: [gx, gy + gh], tex_coords: [region.u0, region.v1], color });
+                        glyph_vertices.push(GlyphVertex {
+                            position: [gx, gy],
+                            tex_coords: [region.u0, region.v0],
+                            color,
+                        });
+                        glyph_vertices.push(GlyphVertex {
+                            position: [gx + gw, gy],
+                            tex_coords: [region.u1, region.v0],
+                            color,
+                        });
+                        glyph_vertices.push(GlyphVertex {
+                            position: [gx, gy + gh],
+                            tex_coords: [region.u0, region.v1],
+                            color,
+                        });
+                        glyph_vertices.push(GlyphVertex {
+                            position: [gx + gw, gy],
+                            tex_coords: [region.u1, region.v0],
+                            color,
+                        });
+                        glyph_vertices.push(GlyphVertex {
+                            position: [gx + gw, gy + gh],
+                            tex_coords: [region.u1, region.v1],
+                            color,
+                        });
+                        glyph_vertices.push(GlyphVertex {
+                            position: [gx, gy + gh],
+                            tex_coords: [region.u0, region.v1],
+                            color,
+                        });
                     }
                     cx += tab_info.cell_w;
                 }
@@ -678,9 +785,14 @@ impl GpuDrawer {
 
         if w == 0 || h == 0 {
             let region = GlyphRegion {
-                u0: 0.0, v0: 0.0, u1: 0.0, v1: 0.0,
-                width: 0, height: 0,
-                offset_x: 0.0, offset_y: 0.0,
+                u0: 0.0,
+                v0: 0.0,
+                u1: 0.0,
+                v1: 0.0,
+                width: 0,
+                height: 0,
+                offset_x: 0.0,
+                offset_y: 0.0,
             };
             self.glyph_regions.insert(c, region);
             return region;
@@ -743,6 +855,89 @@ fn rgb_to_f32(rgb: Rgb) -> [f32; 3] {
     ]
 }
 
+fn push_bg_rect(bg_verts: &mut Vec<BgVertex>, x: f32, y: f32, w: f32, h: f32, color: [f32; 3]) {
+    bg_verts.push(BgVertex {
+        position: [x, y],
+        color,
+    });
+    bg_verts.push(BgVertex {
+        position: [x + w, y],
+        color,
+    });
+    bg_verts.push(BgVertex {
+        position: [x, y + h],
+        color,
+    });
+    bg_verts.push(BgVertex {
+        position: [x + w, y],
+        color,
+    });
+    bg_verts.push(BgVertex {
+        position: [x + w, y + h],
+        color,
+    });
+    bg_verts.push(BgVertex {
+        position: [x, y + h],
+        color,
+    });
+}
+
+fn push_block_element_rects(
+    bg_verts: &mut Vec<BgVertex>,
+    ch: char,
+    cx: f32,
+    cy: f32,
+    cell_w: f32,
+    cell_h: f32,
+    fg: [f32; 3],
+) -> bool {
+    let hw = cell_w / 2.0;
+    let hh = cell_h / 2.0;
+    match ch {
+        '\u{2588}' => push_bg_rect(bg_verts, cx, cy, cell_w, cell_h, fg), // █
+        '\u{2580}' => push_bg_rect(bg_verts, cx, cy, cell_w, hh, fg),     // ▀
+        '\u{2584}' => push_bg_rect(bg_verts, cx, cy + hh, cell_w, hh, fg), // ▄
+        '\u{258C}' => push_bg_rect(bg_verts, cx, cy, hw, cell_h, fg),     // ▌
+        '\u{2590}' => push_bg_rect(bg_verts, cx + hw, cy, hw, cell_h, fg), // ▐
+        '\u{259B}' => {
+            // ▛ upper half + lower-left
+            push_bg_rect(bg_verts, cx, cy, cell_w, hh, fg);
+            push_bg_rect(bg_verts, cx, cy + hh, hw, hh, fg);
+        }
+        '\u{259C}' => {
+            // ▜ upper half + lower-right
+            push_bg_rect(bg_verts, cx, cy, cell_w, hh, fg);
+            push_bg_rect(bg_verts, cx + hw, cy + hh, hw, hh, fg);
+        }
+        '\u{2599}' => {
+            // ▙ lower half + upper-left
+            push_bg_rect(bg_verts, cx, cy, hw, hh, fg);
+            push_bg_rect(bg_verts, cx, cy + hh, cell_w, hh, fg);
+        }
+        '\u{259F}' => {
+            // ▟ lower half + upper-right
+            push_bg_rect(bg_verts, cx + hw, cy, hw, hh, fg);
+            push_bg_rect(bg_verts, cx, cy + hh, cell_w, hh, fg);
+        }
+        '\u{2598}' => push_bg_rect(bg_verts, cx, cy, hw, hh, fg), // ▘
+        '\u{259D}' => push_bg_rect(bg_verts, cx + hw, cy, hw, hh, fg), // ▝
+        '\u{2596}' => push_bg_rect(bg_verts, cx, cy + hh, hw, hh, fg), // ▖
+        '\u{2597}' => push_bg_rect(bg_verts, cx + hw, cy + hh, hw, hh, fg), // ▗
+        '\u{259A}' => {
+            // ▚ upper-left + lower-right
+            push_bg_rect(bg_verts, cx, cy, hw, hh, fg);
+            push_bg_rect(bg_verts, cx + hw, cy + hh, hw, hh, fg);
+        }
+        '\u{259E}' => {
+            // ▞ upper-right + lower-left
+            push_bg_rect(bg_verts, cx + hw, cy, hw, hh, fg);
+            push_bg_rect(bg_verts, cx, cy + hh, hw, hh, fg);
+        }
+        _ => return false,
+    }
+    true
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum LineWeight {
     None,
@@ -763,50 +958,94 @@ struct BoxSegments {
 fn box_drawing_segments(ch: char) -> Option<BoxSegments> {
     use LineWeight::*;
     let s = |left, right, up, down, h: LineWeight, v: LineWeight| {
-        Some(BoxSegments { left, right, up, down, h_weight: h, v_weight: v })
+        Some(BoxSegments {
+            left,
+            right,
+            up,
+            down,
+            h_weight: h,
+            v_weight: v,
+        })
     };
     match ch {
         // Light lines
-        '\u{2500}' => s(true,  true,  false, false, Light, None),   // ─
-        '\u{2502}' => s(false, false, true,  true,  None,  Light),  // │
-        '\u{250C}' => s(false, true,  false, true,  Light, Light),  // ┌
-        '\u{2510}' => s(true,  false, false, true,  Light, Light),  // ┐
-        '\u{2514}' => s(false, true,  true,  false, Light, Light),  // └
-        '\u{2518}' => s(true,  false, true,  false, Light, Light),  // ┘
-        '\u{251C}' => s(false, true,  true,  true,  Light, Light),  // ├
-        '\u{2524}' => s(true,  false, true,  true,  Light, Light),  // ┤
-        '\u{252C}' => s(true,  true,  false, true,  Light, Light),  // ┬
-        '\u{2534}' => s(true,  true,  true,  false, Light, Light),  // ┴
-        '\u{253C}' => s(true,  true,  true,  true,  Light, Light),  // ┼
+        '\u{2500}' => s(true, true, false, false, Light, None), // ─
+        '\u{2502}' => s(false, false, true, true, None, Light), // │
+        '\u{250C}' => s(false, true, false, true, Light, Light), // ┌
+        '\u{2510}' => s(true, false, false, true, Light, Light), // ┐
+        '\u{2514}' => s(false, true, true, false, Light, Light), // └
+        '\u{2518}' => s(true, false, true, false, Light, Light), // ┘
+        '\u{251C}' => s(false, true, true, true, Light, Light), // ├
+        '\u{2524}' => s(true, false, true, true, Light, Light), // ┤
+        '\u{252C}' => s(true, true, false, true, Light, Light), // ┬
+        '\u{2534}' => s(true, true, true, false, Light, Light), // ┴
+        '\u{253C}' => s(true, true, true, true, Light, Light),  // ┼
         // Heavy lines
-        '\u{2501}' => s(true,  true,  false, false, Heavy, None),   // ━
-        '\u{2503}' => s(false, false, true,  true,  None,  Heavy),  // ┃
-        '\u{250F}' => s(false, true,  false, true,  Heavy, Heavy),  // ┏
-        '\u{2513}' => s(true,  false, false, true,  Heavy, Heavy),  // ┓
-        '\u{2517}' => s(false, true,  true,  false, Heavy, Heavy),  // ┗
-        '\u{251B}' => s(true,  false, true,  false, Heavy, Heavy),  // ┛
-        '\u{2523}' => s(false, true,  true,  true,  Heavy, Heavy),  // ┣
-        '\u{252B}' => s(true,  false, true,  true,  Heavy, Heavy),  // ┫
-        '\u{2533}' => s(true,  true,  false, true,  Heavy, Heavy),  // ┳
-        '\u{253B}' => s(true,  true,  true,  false, Heavy, Heavy),  // ┻
-        '\u{254B}' => s(true,  true,  true,  true,  Heavy, Heavy),  // ╋
+        '\u{2501}' => s(true, true, false, false, Heavy, None), // ━
+        '\u{2503}' => s(false, false, true, true, None, Heavy), // ┃
+        '\u{250F}' => s(false, true, false, true, Heavy, Heavy), // ┏
+        '\u{2513}' => s(true, false, false, true, Heavy, Heavy), // ┓
+        '\u{2517}' => s(false, true, true, false, Heavy, Heavy), // ┗
+        '\u{251B}' => s(true, false, true, false, Heavy, Heavy), // ┛
+        '\u{2523}' => s(false, true, true, true, Heavy, Heavy), // ┣
+        '\u{252B}' => s(true, false, true, true, Heavy, Heavy), // ┫
+        '\u{2533}' => s(true, true, false, true, Heavy, Heavy), // ┳
+        '\u{253B}' => s(true, true, true, false, Heavy, Heavy), // ┻
+        '\u{254B}' => s(true, true, true, true, Heavy, Heavy),  // ╋
         // Double lines
-        '\u{2550}' => s(true,  true,  false, false, Double, None),    // ═
-        '\u{2551}' => s(false, false, true,  true,  None,   Double),  // ║
-        '\u{2554}' => s(false, true,  false, true,  Double, Double),  // ╔
-        '\u{2557}' => s(true,  false, false, true,  Double, Double),  // ╗
-        '\u{255A}' => s(false, true,  true,  false, Double, Double),  // ╚
-        '\u{255D}' => s(true,  false, true,  false, Double, Double),  // ╝
-        '\u{2560}' => s(false, true,  true,  true,  Double, Double),  // ╠
-        '\u{2563}' => s(true,  false, true,  true,  Double, Double),  // ╣
-        '\u{2566}' => s(true,  true,  false, true,  Double, Double),  // ╦
-        '\u{2569}' => s(true,  true,  true,  false, Double, Double),  // ╩
-        '\u{256C}' => s(true,  true,  true,  true,  Double, Double),  // ╬
+        '\u{2550}' => s(true, true, false, false, Double, None), // ═
+        '\u{2551}' => s(false, false, true, true, None, Double), // ║
+        '\u{2554}' => s(false, true, false, true, Double, Double), // ╔
+        '\u{2557}' => s(true, false, false, true, Double, Double), // ╗
+        '\u{255A}' => s(false, true, true, false, Double, Double), // ╚
+        '\u{255D}' => s(true, false, true, false, Double, Double), // ╝
+        '\u{2560}' => s(false, true, true, true, Double, Double), // ╠
+        '\u{2563}' => s(true, false, true, true, Double, Double), // ╣
+        '\u{2566}' => s(true, true, false, true, Double, Double), // ╦
+        '\u{2569}' => s(true, true, true, false, Double, Double), // ╩
+        '\u{256C}' => s(true, true, true, true, Double, Double), // ╬
         // Rounded corners (light)
-        '\u{256D}' => s(false, true,  false, true,  Light, Light),  // ╭
-        '\u{256E}' => s(true,  false, false, true,  Light, Light),  // ╮
-        '\u{256F}' => s(true,  false, true,  false, Light, Light),  // ╯
-        '\u{2570}' => s(false, true,  true,  false, Light, Light),  // ╰
+        '\u{256D}' => s(false, true, false, true, Light, Light), // ╭
+        '\u{256E}' => s(true, false, false, true, Light, Light), // ╮
+        '\u{256F}' => s(true, false, true, false, Light, Light), // ╯
+        '\u{2570}' => s(false, true, true, false, Light, Light), // ╰
         _ => Option::None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn supported_block_element_uses_rect_path() {
+        let mut vertices = Vec::new();
+        let handled = push_block_element_rects(
+            &mut vertices,
+            '\u{2588}', // █
+            0.0,
+            0.0,
+            10.0,
+            20.0,
+            [1.0, 1.0, 1.0],
+        );
+        assert!(handled);
+        assert_eq!(vertices.len(), 6);
+    }
+
+    #[test]
+    fn unsupported_block_element_falls_back_to_glyph_path() {
+        let mut vertices = Vec::new();
+        let handled = push_block_element_rects(
+            &mut vertices,
+            '\u{2585}', // ▅ (currently not in rect mapping)
+            0.0,
+            0.0,
+            10.0,
+            20.0,
+            [1.0, 1.0, 1.0],
+        );
+        assert!(!handled);
+        assert!(vertices.is_empty());
     }
 }
