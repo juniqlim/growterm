@@ -1,5 +1,6 @@
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use std::io;
+use std::sync::{Arc, Mutex};
 
 /// PTY read end. Moved to IO thread in Phase 7.
 pub struct PtyReader {
@@ -14,18 +15,42 @@ impl io::Read for PtyReader {
 
 /// PTY write end + resize control. Stays on main thread.
 pub struct PtyWriter {
-    writer: Box<dyn io::Write + Send>,
+    writer: Arc<Mutex<Box<dyn io::Write + Send>>>,
     master: Box<dyn portable_pty::MasterPty + Send>,
     _child: Box<dyn portable_pty::Child + Send + Sync>,
 }
 
 impl io::Write for PtyWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.writer.write(buf)
+        let mut writer = self
+            .writer
+            .lock()
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "pty writer lock poisoned"))?;
+        writer.write(buf)
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        self.writer.flush()
+        let mut writer = self
+            .writer
+            .lock()
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "pty writer lock poisoned"))?;
+        writer.flush()
+    }
+}
+
+#[derive(Clone)]
+pub struct PtyResponder {
+    writer: Arc<Mutex<Box<dyn io::Write + Send>>>,
+}
+
+impl PtyResponder {
+    pub fn write_all_flush(&self, bytes: &[u8]) -> io::Result<()> {
+        let mut writer = self
+            .writer
+            .lock()
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "pty writer lock poisoned"))?;
+        writer.write_all(bytes)?;
+        writer.flush()
     }
 }
 
@@ -39,6 +64,12 @@ impl PtyWriter {
                 pixel_height: 0,
             })
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+    }
+
+    pub fn responder(&self) -> PtyResponder {
+        PtyResponder {
+            writer: Arc::clone(&self.writer),
+        }
     }
 }
 
@@ -56,7 +87,7 @@ pub fn spawn(rows: u16, cols: u16) -> io::Result<(PtyReader, PtyWriter)> {
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-    let mut cmd = CommandBuilder::new(&shell);
+    let mut cmd = build_shell_command(&shell);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     // .app 번들로 실행 시 launchd 환경에는 LANG이 없어 한글이 깨짐.
@@ -84,13 +115,36 @@ pub fn spawn(rows: u16, cols: u16) -> io::Result<(PtyReader, PtyWriter)> {
         .master
         .take_writer()
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let shared_writer = Arc::new(Mutex::new(writer));
 
     Ok((
         PtyReader { inner: reader },
         PtyWriter {
-            writer,
+            writer: shared_writer,
             master: pair.master,
             _child: child,
         },
     ))
+}
+
+fn build_shell_command(shell: &str) -> CommandBuilder {
+    let mut cmd = CommandBuilder::new(shell);
+    // Start an interactive login shell so zprofile/login PATH setup is applied.
+    cmd.arg("-l");
+    cmd
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::OsStr;
+
+    #[test]
+    fn shell_command_includes_login_flag() {
+        let cmd = super::build_shell_command("/bin/zsh");
+        let argv = cmd.get_argv();
+        assert!(
+            argv.iter().any(|arg| arg == OsStr::new("-l")),
+            "expected shell command argv to include '-l', got: {argv:?}"
+        );
+    }
 }

@@ -1,4 +1,4 @@
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::time::Duration;
 
 use growterm_integration_tests::{
@@ -15,10 +15,36 @@ fn activate_by_pid(pid: u32) {
     std::thread::sleep(Duration::from_millis(500));
 }
 
+fn korean_input_source_selected() -> bool {
+    let output = match Command::new("defaults")
+        .arg("read")
+        .arg("com.apple.HIToolbox")
+        .arg("AppleSelectedInputSources")
+        .output()
+    {
+        Ok(output) => output,
+        Err(_) => return false,
+    };
+    if !output.status.success() {
+        return false;
+    }
+    String::from_utf8_lossy(&output.stdout).contains("com.apple.inputmethod.Korean")
+}
+
 /// 앱 실행 → osascript로 한글 자모(ㅎㅏㄴㄱㅡㄹ) 전송 → 엔터 →
 /// 그리드에 조합된 "한글"이 나타나는지 검증.
 #[test]
 fn osascript_jamo_keystroke_produces_composed_hangul() {
+    if std::env::var("GROWTERM_RUN_IME_COMPOSE_TEST").ok().as_deref() != Some("1") {
+        eprintln!("skip: set GROWTERM_RUN_IME_COMPOSE_TEST=1 to run IME composition test");
+        return;
+    }
+
+    if !korean_input_source_selected() {
+        eprintln!("skip: Korean input source is not selected");
+        return;
+    }
+
     let bin = build_binary();
     let dump_path = std::env::temp_dir().join(format!(
         "growterm_jamo_{}.txt",

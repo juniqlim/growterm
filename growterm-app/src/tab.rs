@@ -155,7 +155,14 @@ impl Tab {
 
         let pty_writer = match growterm_pty::spawn(rows, cols) {
             Ok((reader, writer)) => {
-                start_io_thread(reader, Arc::clone(&terminal), Arc::clone(&dirty), window);
+                let responder = writer.responder();
+                start_io_thread(
+                    reader,
+                    responder,
+                    Arc::clone(&terminal),
+                    Arc::clone(&dirty),
+                    window,
+                );
                 writer
             }
             Err(e) => return Err(e),
@@ -171,16 +178,23 @@ impl Tab {
 
 fn start_io_thread(
     mut reader: growterm_pty::PtyReader,
+    responder: growterm_pty::PtyResponder,
     terminal: Arc<Mutex<TerminalState>>,
     dirty: Arc<AtomicBool>,
     window: Arc<MacWindow>,
 ) {
     std::thread::spawn(move || {
         let mut buf = [0u8; 4096];
+        let mut pending_queries: Vec<u8> = Vec::new();
+        let mut kitty_keyboard_flags: u16 = 0;
+        let mut kitty_keyboard_stack: Vec<u16> = Vec::new();
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
+                    pending_queries.extend_from_slice(&buf[..n]);
+                    let controls = extract_terminal_controls(&mut pending_queries);
+
                     let mut state = terminal.lock().unwrap();
                     let commands = state.vt_parser.parse(&buf[..n]);
                     for cmd in &commands {
@@ -189,7 +203,38 @@ fn start_io_thread(
                     if state.grid.scroll_offset() == 0 {
                         state.grid.reset_scroll();
                     }
+                    let cursor = state.grid.cursor_pos();
                     drop(state);
+
+                    for control in controls {
+                        match control {
+                            TerminalControl::Query(query) => {
+                                let response = encode_terminal_query_response(
+                                    query,
+                                    cursor,
+                                    kitty_keyboard_flags,
+                                );
+                                let _ = responder.write_all_flush(response.as_bytes());
+                            }
+                            TerminalControl::KittyKeyboardPush(flags) => {
+                                kitty_keyboard_stack.push(kitty_keyboard_flags);
+                                kitty_keyboard_flags = flags;
+                            }
+                            TerminalControl::KittyKeyboardPop(count) => {
+                                let mut remaining = count.max(1);
+                                while remaining > 0 {
+                                    if let Some(prev) = kitty_keyboard_stack.pop() {
+                                        kitty_keyboard_flags = prev;
+                                    } else {
+                                        kitty_keyboard_flags = 0;
+                                        break;
+                                    }
+                                    remaining -= 1;
+                                }
+                            }
+                        }
+                    }
+
                     dirty.store(true, Ordering::Relaxed);
                     window.request_redraw();
                 }
@@ -203,6 +248,231 @@ fn start_io_thread(
         }
         window.request_redraw();
     });
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TerminalQuery {
+    CursorPositionReport,
+    PrimaryDeviceAttributes,
+    SecondaryDeviceAttributes,
+    KittyKeyboardQuery,
+    ForegroundColorQuery,
+    BackgroundColorQuery,
+    RequestStatusStringSgr,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TerminalControl {
+    Query(TerminalQuery),
+    KittyKeyboardPush(u16),
+    KittyKeyboardPop(u16),
+}
+
+fn extract_terminal_controls(pending: &mut Vec<u8>) -> Vec<TerminalControl> {
+    let mut controls = Vec::new();
+    let mut i = 0usize;
+    let mut keep_from = None;
+
+    while i < pending.len() {
+        if pending[i] != 0x1b {
+            i += 1;
+            continue;
+        }
+
+        let rest = &pending[i..];
+        if rest.starts_with(b"\x1b[6n") {
+            controls.push(TerminalControl::Query(TerminalQuery::CursorPositionReport));
+            i += 4;
+            continue;
+        }
+        if rest.starts_with(b"\x1b[?u") {
+            controls.push(TerminalControl::Query(TerminalQuery::KittyKeyboardQuery));
+            i += 4;
+            continue;
+        }
+        if rest.starts_with(b"\x1b[c") {
+            controls.push(TerminalControl::Query(TerminalQuery::PrimaryDeviceAttributes));
+            i += 3;
+            continue;
+        }
+        if rest.starts_with(b"\x1b[>c") {
+            controls.push(TerminalControl::Query(TerminalQuery::SecondaryDeviceAttributes));
+            i += 4;
+            continue;
+        }
+        if rest.starts_with(b"\x1b[>0c") {
+            controls.push(TerminalControl::Query(TerminalQuery::SecondaryDeviceAttributes));
+            i += 5;
+            continue;
+        }
+        if rest.starts_with(b"\x1b]10;?\x1b\\") {
+            controls.push(TerminalControl::Query(TerminalQuery::ForegroundColorQuery));
+            i += 8;
+            continue;
+        }
+        if rest.starts_with(b"\x1b]10;?\x07") {
+            controls.push(TerminalControl::Query(TerminalQuery::ForegroundColorQuery));
+            i += 7;
+            continue;
+        }
+        if rest.starts_with(b"\x1b]11;?\x1b\\") {
+            controls.push(TerminalControl::Query(TerminalQuery::BackgroundColorQuery));
+            i += 8;
+            continue;
+        }
+        if rest.starts_with(b"\x1b]11;?\x07") {
+            controls.push(TerminalControl::Query(TerminalQuery::BackgroundColorQuery));
+            i += 7;
+            continue;
+        }
+        if rest.starts_with(b"\x1bP$qm\x1b\\") {
+            controls.push(TerminalControl::Query(TerminalQuery::RequestStatusStringSgr));
+            i += 7;
+            continue;
+        }
+
+        match parse_kitty_keyboard_control(rest) {
+            SequenceParse::Matched(control, consumed) => {
+                controls.push(control);
+                i += consumed;
+                continue;
+            }
+            SequenceParse::NeedMore => {
+                keep_from = Some(i);
+                break;
+            }
+            SequenceParse::NoMatch => {}
+        }
+
+        if is_known_control_prefix(rest) {
+            keep_from = Some(i);
+            break;
+        }
+
+        i += 1;
+    }
+
+    if let Some(start) = keep_from {
+        pending.drain(..start);
+    } else {
+        pending.clear();
+    }
+
+    controls
+}
+
+fn is_known_control_prefix(rest: &[u8]) -> bool {
+    [
+        b"\x1b[6n".as_slice(),
+        b"\x1b[?u".as_slice(),
+        b"\x1b[c".as_slice(),
+        b"\x1b[>c".as_slice(),
+        b"\x1b[>0c".as_slice(),
+        b"\x1b]10;?\x1b\\".as_slice(),
+        b"\x1b]10;?\x07".as_slice(),
+        b"\x1b]11;?\x1b\\".as_slice(),
+        b"\x1b]11;?\x07".as_slice(),
+        b"\x1bP$qm\x1b\\".as_slice(),
+    ]
+        .iter()
+        .any(|pat| pat.starts_with(rest))
+        || is_kitty_keyboard_control_prefix(rest)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SequenceParse<T> {
+    Matched(T, usize),
+    NeedMore,
+    NoMatch,
+}
+
+fn parse_kitty_keyboard_control(rest: &[u8]) -> SequenceParse<TerminalControl> {
+    if !rest.starts_with(b"\x1b[") {
+        return SequenceParse::NoMatch;
+    }
+    if rest.len() < 3 {
+        return SequenceParse::NeedMore;
+    }
+    let mode = rest[2];
+    if mode != b'>' && mode != b'<' {
+        return SequenceParse::NoMatch;
+    }
+    if rest.len() == 3 {
+        return SequenceParse::NeedMore;
+    }
+
+    let mut idx = 3usize;
+    while idx < rest.len() && rest[idx].is_ascii_digit() {
+        idx += 1;
+    }
+    if idx == rest.len() {
+        return SequenceParse::NeedMore;
+    }
+    if rest[idx] != b'u' {
+        return SequenceParse::NoMatch;
+    }
+
+    let digits = &rest[3..idx];
+    if mode == b'>' && digits.is_empty() {
+        return SequenceParse::NoMatch;
+    }
+
+    let value = if digits.is_empty() {
+        1
+    } else {
+        parse_u16_saturating(digits)
+    };
+
+    let control = if mode == b'>' {
+        TerminalControl::KittyKeyboardPush(value)
+    } else {
+        TerminalControl::KittyKeyboardPop(value)
+    };
+    SequenceParse::Matched(control, idx + 1)
+}
+
+fn is_kitty_keyboard_control_prefix(rest: &[u8]) -> bool {
+    if !b"\x1b[".starts_with(rest) {
+        return false;
+    }
+    if rest.len() <= 2 {
+        return true;
+    }
+    let mode = rest[2];
+    if mode != b'>' && mode != b'<' {
+        return false;
+    }
+    rest[3..]
+        .iter()
+        .all(|byte| byte.is_ascii_digit() || *byte == b'u')
+}
+
+fn parse_u16_saturating(bytes: &[u8]) -> u16 {
+    std::str::from_utf8(bytes)
+        .ok()
+        .and_then(|s| s.parse::<u32>().ok())
+        .map(|n| n.min(u16::MAX as u32) as u16)
+        .unwrap_or(0)
+}
+
+fn encode_terminal_query_response(
+    query: TerminalQuery,
+    cursor: (u16, u16),
+    kitty_keyboard_flags: u16,
+) -> String {
+    match query {
+        TerminalQuery::CursorPositionReport => {
+            let row = cursor.0.saturating_add(1);
+            let col = cursor.1.saturating_add(1);
+            format!("\x1b[{row};{col}R")
+        }
+        TerminalQuery::PrimaryDeviceAttributes => "\x1b[?1;2c".to_string(),
+        TerminalQuery::SecondaryDeviceAttributes => "\x1b[>0;95;0c".to_string(),
+        TerminalQuery::KittyKeyboardQuery => format!("\x1b[?{kitty_keyboard_flags}u"),
+        TerminalQuery::ForegroundColorQuery => "\x1b]10;rgb:cccc/cccc/cccc\x07".to_string(),
+        TerminalQuery::BackgroundColorQuery => "\x1b]11;rgb:0000/0000/0000\x07".to_string(),
+        TerminalQuery::RequestStatusStringSgr => "\x1bP1$r0m\x1b\\".to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -335,5 +605,98 @@ mod tests {
         let info = mgr.tab_bar_info();
         assert_eq!(info.titles, vec!["⌘1", "⌘2"]);
         assert_eq!(info.active_index, 1);
+    }
+
+    #[test]
+    fn extract_terminal_queries_detects_known_queries() {
+        let mut pending = b"\x1b[6n\x1b[?u\x1b[c\x1b[>0c".to_vec();
+        let controls = extract_terminal_controls(&mut pending);
+        assert_eq!(
+            controls,
+            vec![
+                TerminalControl::Query(TerminalQuery::CursorPositionReport),
+                TerminalControl::Query(TerminalQuery::KittyKeyboardQuery),
+                TerminalControl::Query(TerminalQuery::PrimaryDeviceAttributes),
+                TerminalControl::Query(TerminalQuery::SecondaryDeviceAttributes),
+            ]
+        );
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn extract_terminal_queries_keeps_partial_sequence() {
+        let mut pending = b"\x1b[6".to_vec();
+        let controls = extract_terminal_controls(&mut pending);
+        assert!(controls.is_empty());
+        assert_eq!(pending, b"\x1b[6");
+    }
+
+    #[test]
+    fn extract_terminal_queries_detects_osc_color_queries_with_bel() {
+        let mut pending = b"\x1b]10;?\x07\x1b]11;?\x07".to_vec();
+        let controls = extract_terminal_controls(&mut pending);
+        assert_eq!(
+            controls,
+            vec![
+                TerminalControl::Query(TerminalQuery::ForegroundColorQuery),
+                TerminalControl::Query(TerminalQuery::BackgroundColorQuery)
+            ]
+        );
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn extract_terminal_controls_detects_kitty_push_query_pop() {
+        let mut pending = b"\x1b[>7u\x1b[?u\x1b[<1u".to_vec();
+        let controls = extract_terminal_controls(&mut pending);
+        assert_eq!(
+            controls,
+            vec![
+                TerminalControl::KittyKeyboardPush(7),
+                TerminalControl::Query(TerminalQuery::KittyKeyboardQuery),
+                TerminalControl::KittyKeyboardPop(1)
+            ]
+        );
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn extract_terminal_controls_detects_decrqss_sgr_query() {
+        let mut pending = b"\x1bP$qm\x1b\\".to_vec();
+        let controls = extract_terminal_controls(&mut pending);
+        assert_eq!(
+            controls,
+            vec![TerminalControl::Query(TerminalQuery::RequestStatusStringSgr)]
+        );
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn extract_terminal_controls_keeps_partial_kitty_push() {
+        let mut pending = b"\x1b[>7".to_vec();
+        let controls = extract_terminal_controls(&mut pending);
+        assert!(controls.is_empty());
+        assert_eq!(pending, b"\x1b[>7");
+    }
+
+    #[test]
+    fn kitty_keyboard_query_response_uses_runtime_flags() {
+        let response = encode_terminal_query_response(TerminalQuery::KittyKeyboardQuery, (0, 0), 7);
+        assert_eq!(response, "\x1b[?7u");
+    }
+
+    #[test]
+    fn osc_query_responses_use_bel_terminator() {
+        let fg = encode_terminal_query_response(TerminalQuery::ForegroundColorQuery, (0, 0), 0);
+        let bg = encode_terminal_query_response(TerminalQuery::BackgroundColorQuery, (0, 0), 0);
+        assert_eq!(fg, "\x1b]10;rgb:cccc/cccc/cccc\x07");
+        assert_eq!(bg, "\x1b]11;rgb:0000/0000/0000\x07");
+    }
+
+    #[test]
+    fn decrqss_sgr_response_is_supported() {
+        let response =
+            encode_terminal_query_response(TerminalQuery::RequestStatusStringSgr, (0, 0), 0);
+        assert_eq!(response, "\x1bP1$r0m\x1b\\");
     }
 }

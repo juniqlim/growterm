@@ -14,12 +14,11 @@ impl Handler {
     }
 
     fn handle_sgr(&mut self, params: &vte::Params) {
-        let mut iter = params.iter();
-        loop {
-            let param = match iter.next() {
-                Some(p) => p[0],
-                None => return,
-            };
+        let parts: Vec<&[u16]> = params.iter().collect();
+        let mut i = 0usize;
+        while i < parts.len() {
+            let part = parts[i];
+            let param = part.first().copied().unwrap_or(0);
             match param {
                 0 => self.commands.push(TerminalCommand::ResetAttributes),
                 1 => self.commands.push(TerminalCommand::SetBold),
@@ -42,8 +41,9 @@ impl Handler {
                     ));
                 }
                 38 => {
-                    if let Some(color) = self.parse_extended_color(&mut iter) {
+                    if let Some((color, consumed)) = self.parse_extended_color(&parts, i) {
                         self.commands.push(TerminalCommand::SetForeground(color));
+                        i += consumed;
                     }
                 }
                 39 => self.commands.push(TerminalCommand::SetForeground(Color::Default)),
@@ -54,8 +54,9 @@ impl Handler {
                     ));
                 }
                 48 => {
-                    if let Some(color) = self.parse_extended_color(&mut iter) {
+                    if let Some((color, consumed)) = self.parse_extended_color(&parts, i) {
                         self.commands.push(TerminalCommand::SetBackground(color));
+                        i += consumed;
                     }
                 }
                 49 => self.commands.push(TerminalCommand::SetBackground(Color::Default)),
@@ -73,28 +74,67 @@ impl Handler {
                 }
                 _ => {} // ignore unknown SGR
             }
+            i += 1;
         }
     }
 
-    fn parse_extended_color<'a>(
+    fn parse_extended_color(
         &self,
-        iter: &mut impl Iterator<Item = &'a [u16]>,
-    ) -> Option<Color> {
-        match iter.next()?.first()? {
+        parts: &[&[u16]],
+        i: usize,
+    ) -> Option<(Color, usize)> {
+        let cur = parts.get(i)?;
+
+        // Colon form (e.g. 38:5:196 / 48:2::10:20:30) arrives as a single part.
+        if cur.len() >= 2 {
+            match cur[1] {
+                5 => {
+                    let idx = *cur.get(2)? as u8;
+                    return Some((Color::Indexed(idx), 0));
+                }
+                2 => {
+                    let rgb = Self::parse_rgb_tail(&cur[2..])?;
+                    return Some((Color::Rgb(rgb), 0));
+                }
+                _ => return None,
+            }
+        }
+
+        // Semicolon form (e.g. 38;5;196 / 48;2;10;20;30)
+        let mode = *parts.get(i + 1)?.first()?;
+        match mode {
             5 => {
-                // 256-color: 38;5;N or 48;5;N
-                let idx = *iter.next()?.first()? as u8;
-                Some(Color::Indexed(idx))
+                let idx = *parts.get(i + 2)?.first()? as u8;
+                Some((Color::Indexed(idx), 2))
             }
             2 => {
-                // RGB: 38;2;R;G;B or 48;2;R;G;B
-                let r = *iter.next()?.first()? as u8;
-                let g = *iter.next()?.first()? as u8;
-                let b = *iter.next()?.first()? as u8;
-                Some(Color::Rgb(Rgb::new(r, g, b)))
+                let first = *parts.get(i + 2)?.first()?;
+                if first == 0 {
+                    let r = *parts.get(i + 3)?.first()? as u8;
+                    let g = *parts.get(i + 4)?.first()? as u8;
+                    let b = *parts.get(i + 5)?.first()? as u8;
+                    Some((Color::Rgb(Rgb::new(r, g, b)), 5))
+                } else {
+                    let r = first as u8;
+                    let g = *parts.get(i + 3)?.first()? as u8;
+                    let b = *parts.get(i + 4)?.first()? as u8;
+                    Some((Color::Rgb(Rgb::new(r, g, b)), 4))
+                }
             }
             _ => None,
         }
+    }
+
+    fn parse_rgb_tail(tail: &[u16]) -> Option<Rgb> {
+        // Accept both [R,G,B] and [0,R,G,B] (colorspace id omitted/present).
+        let rgb = if tail.len() >= 4 && tail[0] == 0 {
+            &tail[1..4]
+        } else if tail.len() >= 3 {
+            &tail[..3]
+        } else {
+            return None;
+        };
+        Some(Rgb::new(rgb[0] as u8, rgb[1] as u8, rgb[2] as u8))
     }
 }
 
@@ -440,6 +480,24 @@ mod tests {
         assert_eq!(cmds, vec![
             TerminalCommand::SetBackground(Color::Rgb(Rgb::new(10, 20, 30)))
         ]);
+    }
+
+    #[test]
+    fn parse_sgr_background_rgb_colon_form() {
+        let mut parser = VtParser::new();
+        // ESC[48:2::10:20:30m = RGB background (colon form)
+        let cmds = parser.parse(b"\x1b[48:2::10:20:30m");
+        assert_eq!(cmds, vec![
+            TerminalCommand::SetBackground(Color::Rgb(Rgb::new(10, 20, 30)))
+        ]);
+    }
+
+    #[test]
+    fn parse_sgr_foreground_256_colon_form() {
+        let mut parser = VtParser::new();
+        // ESC[38:5:196m = 256-color foreground (colon form)
+        let cmds = parser.parse(b"\x1b[38:5:196m");
+        assert_eq!(cmds, vec![TerminalCommand::SetForeground(Color::Indexed(196))]);
     }
 
     #[test]

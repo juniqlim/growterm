@@ -6,7 +6,7 @@ use objc2::runtime::{AnyObject, NSObjectProtocol, Sel};
 use objc2::{define_class, msg_send, DefinedClass, MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
     NSDragOperation, NSDraggingDestination, NSDraggingInfo, NSEvent, NSEventModifierFlags,
-    NSFilenamesPboardType, NSTextInputClient, NSView,
+    NSTextInputClient, NSView,
 };
 use objc2_foundation::{
     NSArray, NSAttributedString, NSAttributedStringKey, NSCopying, NSPoint, NSRange,
@@ -341,8 +341,7 @@ impl TerminalView {
         }
         // Register for file drag & drop
         let file_url_type = unsafe { objc2_app_kit::NSPasteboardTypeFileURL };
-        let filename_type = unsafe { NSFilenamesPboardType };
-        let types = NSArray::from_retained_slice(&[file_url_type.copy(), filename_type.copy()]);
+        let types = NSArray::from_retained_slice(&[file_url_type.copy()]);
         this.registerForDraggedTypes(&types);
         this
     }
@@ -409,11 +408,13 @@ fn url_string_to_path(url_str: &str) -> String {
 }
 
 fn extract_dropped_paths(pasteboard: &objc2_app_kit::NSPasteboard) -> Option<Vec<String>> {
-    if let Some(filenames_obj) = pasteboard.propertyListForType(unsafe { NSFilenamesPboardType }) {
-        let filenames: Retained<NSArray<NSString>> = unsafe { Retained::cast(filenames_obj) };
-        let paths: Vec<String> = filenames
+    let file_url_type = unsafe { objc2_app_kit::NSPasteboardTypeFileURL };
+
+    if let Some(items) = pasteboard.pasteboardItems() {
+        let paths: Vec<String> = items
             .iter()
-            .map(|name| name.to_string())
+            .filter_map(|item| item.stringForType(file_url_type))
+            .map(|url| url_string_to_path(&url.to_string()))
             .filter(|s| !s.is_empty())
             .collect();
         if !paths.is_empty() {
@@ -421,15 +422,17 @@ fn extract_dropped_paths(pasteboard: &objc2_app_kit::NSPasteboard) -> Option<Vec
         }
     }
 
-    let file_url_type = unsafe { objc2_app_kit::NSPasteboardTypeFileURL };
-    pasteboard.stringForType(file_url_type).map(|urls_str| {
-        urls_str
-            .to_string()
-            .lines()
-            .map(url_string_to_path)
-            .filter(|s| !s.is_empty())
-            .collect()
-    })
+    pasteboard
+        .stringForType(file_url_type)
+        .map(|urls_str| parse_file_url_lines(&urls_str.to_string()))
+}
+
+fn parse_file_url_lines(input: &str) -> Vec<String> {
+    input
+        .lines()
+        .map(url_string_to_path)
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 fn percent_decode(s: &str) -> String {
@@ -491,6 +494,24 @@ mod tests {
         assert_eq!(
             url_string_to_path("file://localhost/Users/me/file.txt"),
             "/Users/me/file.txt"
+        );
+    }
+
+    #[test]
+    fn parse_file_url_lines_multiple_urls() {
+        let input = "file:///tmp/a.png\nfile:///tmp/b%20c.jpg";
+        assert_eq!(
+            parse_file_url_lines(input),
+            vec!["/tmp/a.png".to_string(), "/tmp/b c.jpg".to_string()]
+        );
+    }
+
+    #[test]
+    fn parse_file_url_lines_ignores_empty_lines() {
+        let input = "\nfile:///tmp/a.png\n\n";
+        assert_eq!(
+            parse_file_url_lines(input),
+            vec!["/tmp/a.png".to_string()]
         );
     }
 }

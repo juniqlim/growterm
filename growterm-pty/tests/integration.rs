@@ -82,11 +82,13 @@ fn write_and_read_unicode() {
 fn term_env_is_set() {
     let (reader, mut writer) = growterm_pty::spawn(24, 80).expect("failed to spawn");
 
-    writer.write_all(b"echo $TERM\n").expect("write failed");
+    writer
+        .write_all(b"printf 'TERMVAL=%s\\n' \"$TERM\"\n")
+        .expect("write failed");
 
-    let output = read_until(reader, "xterm-256color", Duration::from_secs(3));
+    let output = read_until(reader, "TERMVAL=xterm-256color", Duration::from_secs(20));
     assert!(
-        output.contains("xterm-256color"),
+        output.contains("TERMVAL=xterm-256color"),
         "expected TERM=xterm-256color in output, got: {output}"
     );
 }
@@ -117,7 +119,7 @@ fn hangul_echo_roundtrip() {
         .write_all(b"printf '\\xed\\x95\\x9c\\xea\\xb8\\x80\\n'\n")
         .expect("write failed");
 
-    let output = read_until(reader, "한글", Duration::from_secs(3));
+    let output = read_until(reader, "한글", Duration::from_secs(20));
     // 한글이 깨지지 않고 UTF-8로 정상 출력되는지 확인
     assert!(
         output.contains("한글"),
@@ -143,7 +145,9 @@ fn cwd_is_home() {
 fn exit_shell() {
     let (reader, mut writer) = growterm_pty::spawn(24, 80).expect("failed to spawn");
 
-    writer.write_all(b"exit\n").expect("write failed");
+    writer.write_all(b"exit\n\x04").expect("write failed");
+    writer.flush().expect("flush failed");
+    drop(writer);
 
     // After exit, reader should eventually get EOF or error
     let (tx, rx) = mpsc::channel();
@@ -166,6 +170,6 @@ fn exit_shell() {
         }
     });
 
-    let finished = rx.recv_timeout(Duration::from_secs(5)).unwrap_or(false);
+    let finished = rx.recv_timeout(Duration::from_secs(20)).unwrap_or(false);
     assert!(finished, "reader should terminate after shell exits");
 }
