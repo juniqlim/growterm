@@ -35,7 +35,9 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
     let mut deferred: Option<AppEvent> = None;
     let grid_dump_path = std::env::var("GROWTERM_GRID_DUMP").ok();
     let test_input = std::env::var("GROWTERM_TEST_INPUT").ok();
+    let test_dropped_path = std::env::var("GROWTERM_TEST_DROPPED_PATH").ok();
     let mut test_input_sent = false;
+    let mut test_drop_sent = false;
 
     loop {
         let event = if let Some(evt) = deferred.take() {
@@ -344,6 +346,13 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                                     dump.push('\n');
                                 }
                                 drop(state);
+                                if let Some(ref dropped_path) = test_dropped_path {
+                                    if !test_drop_sent && !dropped_path.is_empty() {
+                                        test_drop_sent = true;
+                                        deferred = Some(AppEvent::FileDropped(vec![dropped_path.clone()]));
+                                        continue;
+                                    }
+                                }
                                 if let Some(ref input) = test_input {
                                     if !test_input_sent {
                                         let _ = tab.pty_writer.write_all(input.as_bytes());
@@ -358,10 +367,29 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     }
                 }
             }
+            AppEvent::FileDropped(paths) => {
+                if let Some(tab) = tabs.active_tab_mut() {
+                    let text = paths
+                        .iter()
+                        .map(|p| shell_escape(p))
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    let _ = tab.pty_writer.write_all(text.as_bytes());
+                    let _ = tab.pty_writer.flush();
+                }
+            }
             AppEvent::CloseRequested => {
                 std::process::exit(0);
             }
         }
+    }
+}
+
+fn shell_escape(path: &str) -> String {
+    if path.contains(|c: char| c.is_whitespace() || "\"'\\$`!#&|;(){}[]<>?*~".contains(c)) {
+        format!("'{}'", path.replace('\'', "'\\''"))
+    } else {
+        path.to_string()
     }
 }
 
@@ -414,4 +442,29 @@ fn render_with_tabs(drawer: &mut GpuDrawer, tabs: &TabManager, preedit: &str, se
     };
 
     drawer.draw(&commands, scrollbar, tab_bar.as_ref());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shell_escape_plain_path() {
+        assert_eq!(shell_escape("/Users/me/file.txt"), "/Users/me/file.txt");
+    }
+
+    #[test]
+    fn shell_escape_path_with_spaces() {
+        assert_eq!(shell_escape("/Users/me/my file.txt"), "'/Users/me/my file.txt'");
+    }
+
+    #[test]
+    fn shell_escape_path_with_special_chars() {
+        assert_eq!(shell_escape("/tmp/a&b.txt"), "'/tmp/a&b.txt'");
+    }
+
+    #[test]
+    fn shell_escape_path_with_single_quote() {
+        assert_eq!(shell_escape("/tmp/it's.txt"), "'/tmp/it'\\''s.txt'");
+    }
 }

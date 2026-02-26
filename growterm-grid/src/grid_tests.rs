@@ -777,6 +777,81 @@ fn reset_scroll_sets_offset_to_zero() {
 }
 
 #[test]
+fn scroll_offset_nonzero_when_scrolled_up() {
+    let mut grid = Grid::new(5, 2);
+    for c in "AAAAA".chars() {
+        grid.apply(&TerminalCommand::Print(c));
+    }
+    grid.apply(&TerminalCommand::CarriageReturn);
+    grid.apply(&TerminalCommand::Newline);
+    for c in "BBBBB".chars() {
+        grid.apply(&TerminalCommand::Print(c));
+    }
+    grid.apply(&TerminalCommand::CarriageReturn);
+    grid.apply(&TerminalCommand::Newline);
+    // User scrolls up
+    grid.scroll_up_view(1);
+    assert!(grid.scroll_offset() > 0);
+    // Simulate: caller should NOT reset_scroll when offset > 0
+    // (auto-scroll only when already at bottom)
+    if grid.scroll_offset() == 0 {
+        grid.reset_scroll();
+    }
+    // Scroll position should be preserved
+    assert_eq!(grid.scroll_offset(), 1);
+}
+
+#[test]
+fn auto_scroll_when_already_at_bottom() {
+    let mut grid = Grid::new(5, 2);
+    for c in "AAAAA".chars() {
+        grid.apply(&TerminalCommand::Print(c));
+    }
+    grid.apply(&TerminalCommand::CarriageReturn);
+    grid.apply(&TerminalCommand::Newline);
+    // Already at bottom (offset == 0)
+    assert_eq!(grid.scroll_offset(), 0);
+    // Simulate: caller resets scroll when at bottom
+    if grid.scroll_offset() == 0 {
+        grid.reset_scroll();
+    }
+    assert_eq!(grid.scroll_offset(), 0);
+}
+
+#[test]
+fn scroll_offset_increases_when_scrollback_grows() {
+    let mut grid = Grid::new(5, 2);
+    // Push "AAAAA" to scrollback
+    for c in "AAAAA".chars() {
+        grid.apply(&TerminalCommand::Print(c));
+    }
+    grid.apply(&TerminalCommand::CarriageReturn);
+    grid.apply(&TerminalCommand::Newline);
+    for c in "BBBBB".chars() {
+        grid.apply(&TerminalCommand::Print(c));
+    }
+    grid.apply(&TerminalCommand::CarriageReturn);
+    grid.apply(&TerminalCommand::Newline);
+    // User scrolls up 1
+    grid.scroll_up_view(1);
+    assert_eq!(grid.scroll_offset(), 1);
+    let vis = grid.visible_cells();
+    assert_eq!(vis[0][0].character, 'A');
+
+    // New output causes another scroll_up (newline at bottom)
+    for c in "CCCCC".chars() {
+        grid.apply(&TerminalCommand::Print(c));
+    }
+    grid.apply(&TerminalCommand::CarriageReturn);
+    grid.apply(&TerminalCommand::Newline);
+
+    // scroll_offset should have increased to keep viewing the same content
+    assert_eq!(grid.scroll_offset(), 2);
+    let vis = grid.visible_cells();
+    assert_eq!(vis[0][0].character, 'A');
+}
+
+#[test]
 fn scroll_up_view_clamps_to_scrollback_len() {
     let mut grid = Grid::new(5, 2);
     for c in "AAAAA".chars() {

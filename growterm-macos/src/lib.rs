@@ -90,6 +90,10 @@ fn setup_main_menu(app: &NSApplication) {
 /// 실행 파일을 심볼릭 링크로 연결한다.
 /// .app 번들로 실행 시에는 아무 작업도 하지 않는다.
 fn ensure_bundle_identifier() {
+    if should_skip_bundle_relaunch() {
+        return;
+    }
+
     let Ok(exe) = std::env::current_exe() else { return };
     let exe = exe.canonicalize().unwrap_or(exe);
     let Some(dir) = exe.parent() else { return };
@@ -146,4 +150,29 @@ fn ensure_bundle_identifier() {
         .spawn();
 
     std::process::exit(0);
+}
+
+fn should_skip_bundle_relaunch() -> bool {
+    matches!(
+        std::env::var("GROWTERM_DISABLE_APP_RELAUNCH"),
+        Ok(v) if !v.is_empty() && v != "0" && !v.eq_ignore_ascii_case("false")
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn should_skip_bundle_relaunch_when_env_is_set() {
+        unsafe { std::env::set_var("GROWTERM_DISABLE_APP_RELAUNCH", "1") };
+        assert!(should_skip_bundle_relaunch());
+        unsafe { std::env::remove_var("GROWTERM_DISABLE_APP_RELAUNCH") };
+    }
+
+    #[test]
+    fn should_not_skip_bundle_relaunch_when_env_is_unset() {
+        unsafe { std::env::remove_var("GROWTERM_DISABLE_APP_RELAUNCH") };
+        assert!(!should_skip_bundle_relaunch());
+    }
 }

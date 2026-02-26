@@ -2,9 +2,12 @@ use std::cell::{Cell, RefCell};
 use std::sync::mpsc::Sender;
 
 use objc2::rc::Retained;
-use objc2::runtime::{AnyObject, Sel};
+use objc2::runtime::{AnyObject, NSObjectProtocol, Sel};
 use objc2::{define_class, msg_send, DefinedClass, MainThreadMarker, MainThreadOnly};
-use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSTextInputClient, NSView};
+use objc2_app_kit::{
+    NSDragOperation, NSDraggingDestination, NSDraggingInfo, NSEvent, NSEventModifierFlags,
+    NSFilenamesPboardType, NSTextInputClient, NSView,
+};
 use objc2_foundation::{
     NSArray, NSAttributedString, NSAttributedStringKey, NSCopying, NSPoint, NSRange,
     NSRangePointer, NSRect, NSString, NSUInteger,
@@ -177,6 +180,49 @@ define_class! {
         }
     }
 
+    unsafe impl NSObjectProtocol for TerminalView {}
+
+    // --- NSDraggingDestination ---
+
+    unsafe impl NSDraggingDestination for TerminalView {
+        #[unsafe(method(draggingEntered:))]
+        fn dragging_entered(
+            &self,
+            sender: &objc2::runtime::ProtocolObject<dyn NSDraggingInfo>,
+        ) -> NSDragOperation {
+            let pasteboard = sender.draggingPasteboard();
+            if let Some(filenames) = extract_dropped_paths(&pasteboard) {
+                if !filenames.is_empty() {
+                    return NSDragOperation::Copy;
+                }
+            }
+            NSDragOperation::None
+        }
+
+        #[unsafe(method(prepareForDragOperation:))]
+        fn prepare_for_drag_operation(
+            &self,
+            _sender: &objc2::runtime::ProtocolObject<dyn NSDraggingInfo>,
+        ) -> objc2::runtime::Bool {
+            objc2::runtime::Bool::YES
+        }
+
+        #[unsafe(method(performDragOperation:))]
+        fn perform_drag_operation(
+            &self,
+            sender: &objc2::runtime::ProtocolObject<dyn NSDraggingInfo>,
+        ) -> objc2::runtime::Bool {
+            let pasteboard = sender.draggingPasteboard();
+            if let Some(paths) = extract_dropped_paths(&pasteboard) {
+                if !paths.is_empty() {
+                    self.send_event(AppEvent::FileDropped(paths));
+                    return objc2::runtime::Bool::YES;
+                }
+            }
+            objc2::runtime::Bool::NO
+        }
+    }
+
     // --- NSTextInputClient ---
 
     unsafe impl NSTextInputClient for TerminalView {
@@ -293,6 +339,11 @@ impl TerminalView {
         if let Some(layer) = this.layer() {
             layer.setContentsScale(this.backing_scale_factor());
         }
+        // Register for file drag & drop
+        let file_url_type = unsafe { objc2_app_kit::NSPasteboardTypeFileURL };
+        let filename_type = unsafe { NSFilenamesPboardType };
+        let types = NSArray::from_retained_slice(&[file_url_type.copy(), filename_type.copy()]);
+        this.registerForDraggedTypes(&types);
         this
     }
 
@@ -344,6 +395,103 @@ fn nsobj_to_string(obj: &AnyObject) -> String {
     } else {
         let ns_str: &NSString = unsafe { &*(obj as *const AnyObject as *const NSString) };
         ns_str.to_string()
+    }
+}
+
+fn url_string_to_path(url_str: &str) -> String {
+    // file:///path/to/file → /path/to/file (with percent-decoding)
+    if let Some(path) = url_str.strip_prefix("file://") {
+        let path = path.strip_prefix("localhost").unwrap_or(path);
+        percent_decode(path)
+    } else {
+        url_str.to_string()
+    }
+}
+
+fn extract_dropped_paths(pasteboard: &objc2_app_kit::NSPasteboard) -> Option<Vec<String>> {
+    if let Some(filenames_obj) = pasteboard.propertyListForType(unsafe { NSFilenamesPboardType }) {
+        let filenames: Retained<NSArray<NSString>> = unsafe { Retained::cast(filenames_obj) };
+        let paths: Vec<String> = filenames
+            .iter()
+            .map(|name| name.to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if !paths.is_empty() {
+            return Some(paths);
+        }
+    }
+
+    let file_url_type = unsafe { objc2_app_kit::NSPasteboardTypeFileURL };
+    pasteboard.stringForType(file_url_type).map(|urls_str| {
+        urls_str
+            .to_string()
+            .lines()
+            .map(url_string_to_path)
+            .filter(|s| !s.is_empty())
+            .collect()
+    })
+}
+
+fn percent_decode(s: &str) -> String {
+    let mut result = Vec::new();
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(byte) = u8::from_str_radix(
+                &s[i + 1..i + 3],
+                16,
+            ) {
+                result.push(byte);
+                i += 3;
+                continue;
+            }
+        }
+        result.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8(result).unwrap_or_else(|_| s.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn url_string_to_path_basic() {
+        assert_eq!(
+            url_string_to_path("file:///Users/me/file.txt"),
+            "/Users/me/file.txt"
+        );
+    }
+
+    #[test]
+    fn url_string_to_path_with_spaces() {
+        assert_eq!(
+            url_string_to_path("file:///Users/me/my%20file.txt"),
+            "/Users/me/my file.txt"
+        );
+    }
+
+    #[test]
+    fn url_string_to_path_korean() {
+        assert_eq!(
+            url_string_to_path("file:///Users/me/%ED%95%9C%EA%B8%80.txt"),
+            "/Users/me/한글.txt"
+        );
+    }
+
+    #[test]
+    fn url_string_to_path_non_file_url() {
+        assert_eq!(url_string_to_path("/plain/path"), "/plain/path");
+    }
+
+    #[test]
+    fn url_string_to_path_localhost_url() {
+        assert_eq!(
+            url_string_to_path("file://localhost/Users/me/file.txt"),
+            "/Users/me/file.txt"
+        );
     }
 }
 

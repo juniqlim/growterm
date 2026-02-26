@@ -20,6 +20,8 @@ objc2-app-kit = { version = "0.3", features = [
     "NSText",
     "NSMenu",
     "NSMenuItem",
+    "NSDragging",
+    "NSPasteboard",
 ] }
 objc2-quartz-core = { version = "0.3", features = ["CAMetalLayer", "CALayer"] }
 raw-window-handle = "0.6"

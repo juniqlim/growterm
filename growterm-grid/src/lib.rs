@@ -190,8 +190,14 @@ impl Grid {
         self.scrollback.push(row);
         if self.scrollback.len() > MAX_SCROLLBACK {
             self.scrollback.remove(0);
+            // If trimmed and user is scrolled, offset may exceed scrollback
+            self.scroll_offset = self.scroll_offset.min(self.scrollback.len());
         }
         self.cells.push(vec![Cell::default(); self.cols]);
+        if self.scroll_offset > 0 {
+            self.scroll_offset += 1;
+            self.scroll_offset = self.scroll_offset.min(self.scrollback.len());
+        }
     }
 
     pub fn scroll_up_view(&mut self, lines: usize) {

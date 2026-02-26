@@ -186,7 +186,9 @@ fn start_io_thread(
                     for cmd in &commands {
                         state.grid.apply(cmd);
                     }
-                    state.grid.reset_scroll();
+                    if state.grid.scroll_offset() == 0 {
+                        state.grid.reset_scroll();
+                    }
                     drop(state);
                     dirty.store(true, Ordering::Relaxed);
                     window.request_redraw();

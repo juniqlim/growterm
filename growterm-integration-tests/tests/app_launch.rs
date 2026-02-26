@@ -1,18 +1,12 @@
-use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use growterm_integration_tests::build_binary;
+use growterm_integration_tests::{build_binary, spawn_app};
 
 #[test]
 fn app_starts_and_stays_alive() {
     let bin = build_binary();
 
-    let mut child = Command::new(&bin)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("failed to launch growterm");
+    let mut child = spawn_app(&bin);
 
     // Give the app time to initialize window, PTY, and render first frame.
     std::thread::sleep(Duration::from_secs(3));
@@ -42,12 +36,7 @@ fn app_starts_and_stays_alive() {
 fn app_accepts_keystrokes_without_crash() {
     let bin = build_binary();
 
-    let mut child = Command::new(&bin)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("failed to launch growterm");
+    let mut child = spawn_app(&bin);
 
     // Wait for app to initialize.
     std::thread::sleep(Duration::from_secs(3));

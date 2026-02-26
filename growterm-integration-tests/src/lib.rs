@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
@@ -21,6 +22,15 @@ pub fn build_binary() -> String {
         serde_json::from_slice(&metadata.stdout).expect("invalid cargo metadata json");
     let target_dir = meta["target_directory"].as_str().unwrap();
     format!("{target_dir}/debug/growterm")
+}
+
+fn spawn_command(bin: &str) -> Command {
+    let mut cmd = Command::new(bin);
+    cmd.env("GROWTERM_DISABLE_APP_RELAUNCH", "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    cmd
 }
 
 /// Parse the dump file format, returning (cursor_row, cursor_col, grid_rows).
@@ -73,18 +83,83 @@ pub fn wait_for_dump(
 
 /// Kill child process and remove dump file.
 pub fn cleanup(child: &mut std::process::Child, dump_path: &std::path::Path) {
+    #[cfg(unix)]
+    kill_process_tree(child.id());
+
     let _ = child.kill();
     let _ = child.wait();
     let _ = std::fs::remove_file(dump_path);
 }
 
+#[cfg(unix)]
+fn kill_process_tree(root_pid: u32) {
+    let mut descendants = collect_descendants(root_pid);
+    descendants.sort_unstable();
+    descendants.dedup();
+
+    for pid in &descendants {
+        send_signal(*pid, "-TERM");
+    }
+    send_signal(root_pid, "-TERM");
+    std::thread::sleep(Duration::from_millis(100));
+
+    for pid in &descendants {
+        send_signal(*pid, "-KILL");
+    }
+    send_signal(root_pid, "-KILL");
+}
+
+#[cfg(unix)]
+fn collect_descendants(root_pid: u32) -> Vec<u32> {
+    let mut visited: HashSet<u32> = HashSet::new();
+    let mut stack = vec![root_pid];
+    let mut descendants = Vec::new();
+
+    while let Some(pid) = stack.pop() {
+        for child in child_pids(pid) {
+            if visited.insert(child) {
+                descendants.push(child);
+                stack.push(child);
+            }
+        }
+    }
+
+    descendants
+}
+
+#[cfg(unix)]
+fn child_pids(parent_pid: u32) -> Vec<u32> {
+    let output = match Command::new("pgrep")
+        .args(["-P", &parent_pid.to_string()])
+        .output()
+    {
+        Ok(output) => output,
+        Err(_) => return Vec::new(),
+    };
+
+    if !output.status.success() {
+        return Vec::new();
+    }
+
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| line.trim().parse::<u32>().ok())
+        .collect()
+}
+
+#[cfg(unix)]
+fn send_signal(pid: u32, signal: &str) {
+    let _ = Command::new("kill")
+        .args([signal, &pid.to_string()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
 /// Spawn growterm with GROWTERM_GRID_DUMP set.
 pub fn spawn_with_dump(bin: &str, dump_path: &std::path::Path) -> std::process::Child {
-    Command::new(bin)
+    spawn_command(bin)
         .env("GROWTERM_GRID_DUMP", dump_path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
         .spawn()
         .expect("failed to launch growterm")
 }
@@ -95,12 +170,16 @@ pub fn spawn_with_dump_and_input(
     dump_path: &std::path::Path,
     test_input: &str,
 ) -> std::process::Child {
-    Command::new(bin)
+    spawn_command(bin)
         .env("GROWTERM_GRID_DUMP", dump_path)
         .env("GROWTERM_TEST_INPUT", test_input)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to launch growterm")
+}
+
+/// Spawn growterm with no extra test envs.
+pub fn spawn_app(bin: &str) -> std::process::Child {
+    spawn_command(bin)
         .spawn()
         .expect("failed to launch growterm")
 }

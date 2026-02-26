@@ -21,6 +21,8 @@ pub enum AppEvent {
     MouseUp(f64, f64),
     /// 마우스 스크롤 (delta_y: 양수=위, 음수=아래)
     ScrollWheel(f64),
+    /// 파일 드래그 앤 드롭 (파일 경로 목록)
+    FileDropped(Vec<String>),
 }
 
 bitflags::bitflags! {
