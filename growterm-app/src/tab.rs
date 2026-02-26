@@ -469,7 +469,7 @@ fn encode_terminal_query_response(
         TerminalQuery::PrimaryDeviceAttributes => "\x1b[?1;2c".to_string(),
         TerminalQuery::SecondaryDeviceAttributes => "\x1b[>0;95;0c".to_string(),
         TerminalQuery::KittyKeyboardQuery => format!("\x1b[?{kitty_keyboard_flags}u"),
-        TerminalQuery::ForegroundColorQuery => "\x1b]10;rgb:cccc/cccc/cccc\x07".to_string(),
+        TerminalQuery::ForegroundColorQuery => "\x1b]10;rgb:ffff/ffff/ffff\x07".to_string(),
         TerminalQuery::BackgroundColorQuery => "\x1b]11;rgb:0000/0000/0000\x07".to_string(),
         TerminalQuery::RequestStatusStringSgr => "\x1bP1$r0m\x1b\\".to_string(),
     }
@@ -689,7 +689,7 @@ mod tests {
     fn osc_query_responses_use_bel_terminator() {
         let fg = encode_terminal_query_response(TerminalQuery::ForegroundColorQuery, (0, 0), 0);
         let bg = encode_terminal_query_response(TerminalQuery::BackgroundColorQuery, (0, 0), 0);
-        assert_eq!(fg, "\x1b]10;rgb:cccc/cccc/cccc\x07");
+        assert_eq!(fg, "\x1b]10;rgb:ffff/ffff/ffff\x07");
         assert_eq!(bg, "\x1b]11;rgb:0000/0000/0000\x07");
     }
 

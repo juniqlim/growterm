@@ -108,18 +108,20 @@ impl Handler {
                 Some((Color::Indexed(idx), 2))
             }
             2 => {
-                let first = *parts.get(i + 2)?.first()?;
-                if first == 0 {
-                    let r = *parts.get(i + 3)?.first()? as u8;
-                    let g = *parts.get(i + 4)?.first()? as u8;
-                    let b = *parts.get(i + 5)?.first()? as u8;
-                    Some((Color::Rgb(Rgb::new(r, g, b)), 5))
-                } else {
-                    let r = first as u8;
-                    let g = *parts.get(i + 3)?.first()? as u8;
-                    let b = *parts.get(i + 4)?.first()? as u8;
-                    Some((Color::Rgb(Rgb::new(r, g, b)), 4))
+                let c0 = *parts.get(i + 2)?.first()?;
+                let c1 = *parts.get(i + 3)?.first()?;
+                let c2 = *parts.get(i + 4)?.first()?;
+
+                // Accept both:
+                // - 38;2;R;G;B / 48;2;R;G;B
+                // - 38;2;0;R;G;B / 48;2;0;R;G;B (optional colorspace id 0)
+                if c0 == 0 {
+                    if let Some(c3) = parts.get(i + 5).and_then(|p| p.first()) {
+                        return Some((Color::Rgb(Rgb::new(c1 as u8, c2 as u8, *c3 as u8)), 5));
+                    }
                 }
+
+                Some((Color::Rgb(Rgb::new(c0 as u8, c1 as u8, c2 as u8)), 4))
             }
             _ => None,
         }
@@ -480,6 +482,29 @@ mod tests {
         assert_eq!(cmds, vec![
             TerminalCommand::SetBackground(Color::Rgb(Rgb::new(10, 20, 30)))
         ]);
+    }
+
+    #[test]
+    fn parse_sgr_background_rgb_black_semicolon_form() {
+        let mut parser = VtParser::new();
+        // ESC[48;2;0;0;0m = RGB background black
+        // Should not be mis-parsed as DIM + resets.
+        let cmds = parser.parse(b"\x1b[48;2;0;0;0m");
+        assert_eq!(
+            cmds,
+            vec![TerminalCommand::SetBackground(Color::Rgb(Rgb::new(0, 0, 0)))]
+        );
+    }
+
+    #[test]
+    fn parse_sgr_foreground_rgb_black_semicolon_form() {
+        let mut parser = VtParser::new();
+        // ESC[38;2;0;0;0m = RGB foreground black
+        let cmds = parser.parse(b"\x1b[38;2;0;0;0m");
+        assert_eq!(
+            cmds,
+            vec![TerminalCommand::SetForeground(Color::Rgb(Rgb::new(0, 0, 0)))]
+        );
     }
 
     #[test]
