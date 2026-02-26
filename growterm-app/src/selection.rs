@@ -2,19 +2,20 @@ use growterm_types::{Cell, CellFlags};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Selection {
-    pub start: (u16, u16),
-    pub end: (u16, u16),
+    /// Absolute row (scrollback + screen), column
+    pub start: (u32, u16),
+    pub end: (u32, u16),
     pub active: bool,
 }
 
 impl Selection {
-    pub fn begin(&mut self, row: u16, col: u16) {
+    pub fn begin(&mut self, row: u32, col: u16) {
         self.start = (row, col);
         self.end = (row, col);
         self.active = true;
     }
 
-    pub fn update(&mut self, row: u16, col: u16) {
+    pub fn update(&mut self, row: u32, col: u16) {
         self.end = (row, col);
     }
 
@@ -33,7 +34,7 @@ impl Selection {
     }
 
     /// Returns (start, end) in normalized order (top-left to bottom-right)
-    pub fn normalized(&self) -> ((u16, u16), (u16, u16)) {
+    pub fn normalized(&self) -> ((u32, u16), (u32, u16)) {
         let (s, e) = (self.start, self.end);
         if s.0 < e.0 || (s.0 == e.0 && s.1 <= e.1) {
             (s, e)
@@ -42,7 +43,26 @@ impl Selection {
         }
     }
 
-    pub fn contains(&self, row: u16, col: u16) -> bool {
+    /// Convert absolute selection to screen-relative for rendering.
+    /// Returns None if the selection is entirely off-screen.
+    pub fn screen_normalized(&self, view_base: u32, visible_rows: u16) -> Option<((u16, u16), (u16, u16))> {
+        if self.is_empty() {
+            return None;
+        }
+        let ((sr, sc), (er, ec)) = self.normalized();
+        let view_end = view_base + visible_rows as u32;
+        // Entirely off-screen?
+        if er < view_base || sr >= view_end {
+            return None;
+        }
+        let screen_sr = if sr >= view_base { (sr - view_base) as u16 } else { 0 };
+        let screen_sc = if sr >= view_base { sc } else { 0 };
+        let screen_er = if er < view_end { (er - view_base) as u16 } else { visible_rows - 1 };
+        let screen_ec = if er < view_end { ec } else { u16::MAX };
+        Some(((screen_sr, screen_sc), (screen_er, screen_ec)))
+    }
+
+    pub fn contains(&self, row: u32, col: u16) -> bool {
         if self.is_empty() {
             return false;
         }
@@ -94,7 +114,55 @@ pub fn extract_text(cells: &[Vec<Cell>], selection: &Selection) -> String {
         while col < col_end {
             line_text.push(line[col].character);
             if line[col].flags.contains(CellFlags::WIDE_CHAR) {
-                col += 2; // skip spacer cell
+                col += 2;
+            } else {
+                col += 1;
+            }
+        }
+        let trimmed = line_text.trim_end();
+        result.push_str(trimmed);
+
+        if row < er {
+            result.push('\n');
+        }
+    }
+    result
+}
+
+/// Extract text using absolute row coordinates from scrollback + screen cells.
+pub fn extract_text_absolute(grid: &growterm_grid::Grid, selection: &Selection) -> String {
+    if selection.is_empty() {
+        return String::new();
+    }
+    let ((sr, sc), (er, ec)) = selection.normalized();
+    let scrollback = grid.scrollback();
+    let screen = grid.cells();
+    let sb_len = scrollback.len() as u32;
+    let mut result = String::new();
+
+    for row in sr..=er {
+        let line: &[Cell] = if row < sb_len {
+            &scrollback[row as usize]
+        } else {
+            let screen_row = (row - sb_len) as usize;
+            if screen_row >= screen.len() {
+                break;
+            }
+            &screen[screen_row]
+        };
+        let col_start = if row == sr { sc as usize } else { 0 };
+        let col_end = if row == er {
+            (ec as usize + 1).min(line.len())
+        } else {
+            line.len()
+        };
+
+        let mut line_text = String::new();
+        let mut col = col_start;
+        while col < col_end {
+            line_text.push(line[col].character);
+            if line[col].flags.contains(CellFlags::WIDE_CHAR) {
+                col += 2;
             } else {
                 col += 1;
             }
@@ -252,7 +320,6 @@ mod tests {
     #[test]
     fn extract_text_wide_chars_no_spaces() {
         let cells = make_cells_with_wide(&["안녕하세요"]);
-        // "안녕하세요" → 10 columns (each char = 2 cols)
         let mut sel = Selection::default();
         sel.start = (0, 0);
         sel.end = (0, 9);
@@ -262,7 +329,6 @@ mod tests {
     #[test]
     fn extract_text_mixed_ascii_and_wide() {
         let cells = make_cells_with_wide(&["Hi한글ok"]);
-        // H(0) i(1) 한(2,3) 글(4,5) o(6) k(7)
         let mut sel = Selection::default();
         sel.start = (0, 0);
         sel.end = (0, 7);
@@ -276,5 +342,35 @@ mod tests {
         sel.start = (0, 6);
         sel.end = (0, 10);
         assert_eq!(extract_text(&cells, &sel), "World");
+    }
+
+    #[test]
+    fn screen_normalized_basic() {
+        let mut sel = Selection::default();
+        sel.start = (10, 2);
+        sel.end = (12, 5);
+        // view_base=10, 24 visible rows
+        let result = sel.screen_normalized(10, 24);
+        assert_eq!(result, Some(((0, 2), (2, 5))));
+    }
+
+    #[test]
+    fn screen_normalized_off_screen() {
+        let mut sel = Selection::default();
+        sel.start = (0, 0);
+        sel.end = (5, 3);
+        // view starts at row 10
+        let result = sel.screen_normalized(10, 24);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn screen_normalized_partial_overlap() {
+        let mut sel = Selection::default();
+        sel.start = (8, 3);
+        sel.end = (12, 5);
+        // view_base=10, 24 visible rows -> selection starts before view
+        let result = sel.screen_normalized(10, 24);
+        assert_eq!(result, Some(((0, 0), (2, 5))));
     }
 }

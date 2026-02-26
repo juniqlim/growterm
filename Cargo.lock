@@ -759,7 +759,9 @@ dependencies = [
 name = "growterm-integration-tests"
 version = "0.1.0"
 dependencies = [
+ "arboard",
  "bytemuck",
+ "growterm-app",
  "growterm-gpu-draw",
  "growterm-grid",
  "growterm-pty",

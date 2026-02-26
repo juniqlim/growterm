@@ -214,6 +214,10 @@ impl Grid {
         self.scrollback.len()
     }
 
+    pub fn scrollback(&self) -> &[Vec<Cell>] {
+        &self.scrollback
+    }
+
     pub fn visible_cells(&self) -> Vec<Vec<Cell>> {
         if self.scroll_offset == 0 {
             return self.cells.clone();

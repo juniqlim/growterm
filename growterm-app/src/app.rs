@@ -171,6 +171,23 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                         continue;
                     }
 
+                    // Cmd+C copy
+                    if keycode == kc::ANSI_C {
+                        if !sel.is_empty() {
+                            if let Some(tab) = tabs.active_tab() {
+                                let state = tab.terminal.lock().unwrap();
+                                let text = selection::extract_text_absolute(&state.grid, &sel);
+                                drop(state);
+                                if !text.is_empty() {
+                                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                        let _ = clipboard.set_text(text);
+                                    }
+                                }
+                            }
+                        }
+                        continue;
+                    }
+
                     // Cmd+V paste
                     if keycode == kc::ANSI_V {
                         if let Ok(mut clipboard) = arboard::Clipboard::new() {
@@ -226,35 +243,44 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
             }
             AppEvent::MouseDown(x, y) => {
                 let (cw, ch) = drawer.cell_size();
-                let (row, col) = selection::pixel_to_cell(x as f32, y as f32 - tabs.mouse_y_offset(ch), cw, ch);
-                sel.begin(row, col);
+                let (screen_row, col) = selection::pixel_to_cell(x as f32, y as f32 - tabs.mouse_y_offset(ch), cw, ch);
+                let abs_row = if let Some(tab) = tabs.active_tab() {
+                    let state = tab.terminal.lock().unwrap();
+                    let base = state.grid.scrollback_len().saturating_sub(state.grid.scroll_offset());
+                    screen_row as u32 + base as u32
+                } else {
+                    screen_row as u32
+                };
+                sel.begin(abs_row, col);
                 window.request_redraw();
             }
             AppEvent::MouseDragged(x, y) => {
                 if sel.active {
                     let (cw, ch) = drawer.cell_size();
-                    let (row, col) = selection::pixel_to_cell(x as f32, y as f32 - tabs.mouse_y_offset(ch), cw, ch);
-                    sel.update(row, col);
+                    let (screen_row, col) = selection::pixel_to_cell(x as f32, y as f32 - tabs.mouse_y_offset(ch), cw, ch);
+                    let abs_row = if let Some(tab) = tabs.active_tab() {
+                        let state = tab.terminal.lock().unwrap();
+                        let base = state.grid.scrollback_len().saturating_sub(state.grid.scroll_offset());
+                        screen_row as u32 + base as u32
+                    } else {
+                        screen_row as u32
+                    };
+                    sel.update(abs_row, col);
                     window.request_redraw();
                 }
             }
             AppEvent::MouseUp(x, y) => {
                 let (cw, ch) = drawer.cell_size();
-                let (row, col) = selection::pixel_to_cell(x as f32, y as f32 - tabs.mouse_y_offset(ch), cw, ch);
-                sel.update(row, col);
+                let (screen_row, col) = selection::pixel_to_cell(x as f32, y as f32 - tabs.mouse_y_offset(ch), cw, ch);
+                let abs_row = if let Some(tab) = tabs.active_tab() {
+                    let state = tab.terminal.lock().unwrap();
+                    let base = state.grid.scrollback_len().saturating_sub(state.grid.scroll_offset());
+                    screen_row as u32 + base as u32
+                } else {
+                    screen_row as u32
+                };
+                sel.update(abs_row, col);
                 sel.finish();
-                if !sel.is_empty() {
-                    if let Some(tab) = tabs.active_tab() {
-                        let state = tab.terminal.lock().unwrap();
-                        let text = selection::extract_text(state.grid.cells(), &sel);
-                        drop(state);
-                        if !text.is_empty() {
-                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                                let _ = clipboard.set_text(text);
-                            }
-                        }
-                    }
-                }
                 window.request_redraw();
             }
             AppEvent::ScrollWheel(delta_y) => {
@@ -366,7 +392,9 @@ fn render_with_tabs(drawer: &mut GpuDrawer, tabs: &TabManager, preedit: &str, se
         None
     };
     let visible = state.grid.visible_cells();
-    let sel_range = if !sel.is_empty() { Some(sel.normalized()) } else { None };
+    let view_base = (state.grid.scrollback_len().saturating_sub(state.grid.scroll_offset())) as u32;
+    let visible_rows = visible.len() as u16;
+    let sel_range = sel.screen_normalized(view_base, visible_rows);
 
     let show_tab_bar = tabs.show_tab_bar();
     let (cell_w, cell_h) = drawer.cell_size();

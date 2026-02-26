@@ -13,6 +13,8 @@ growterm-grid = { path = "../growterm-grid" }
 growterm-pty = { path = "../growterm-pty" }
 growterm-render-cmd = { path = "../growterm-render-cmd" }
 growterm-gpu-draw = { path = "../growterm-gpu-draw" }
+growterm-app = { path = "../growterm-app" }
+arboard = "3"
 wgpu = "24"
 bytemuck = { version = "1", features = ["derive"] }
 pollster = "0.4"

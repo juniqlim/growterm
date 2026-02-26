@@ -561,17 +561,17 @@ impl GpuDrawer {
 
             push_rect(&mut bg_vertices, 0.0, 0.0, screen_w, bar_h, bar_bg);
 
+            let tab_count = tab_info.titles.len().max(1) as f32;
+            let tab_w = screen_w / tab_count;
             let mut x = 0.0_f32;
-            let pad = tab_info.cell_w;
             for (i, title) in tab_info.titles.iter().enumerate() {
-                let text_w = title.chars().count() as f32 * tab_info.cell_w;
-                let tab_w = text_w + pad * 2.0;
 
                 if i == tab_info.active_index {
                     push_rect(&mut bg_vertices, x, 0.0, tab_w, bar_h, active_bg);
                 }
 
-                let mut cx = x + pad;
+                let text_w = title.chars().count() as f32 * tab_info.cell_w;
+                let mut cx = x + (tab_w - text_w) / 2.0;
                 for ch in title.chars() {
                     if ch == ' ' {
                         cx += tab_info.cell_w;
