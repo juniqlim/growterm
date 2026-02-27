@@ -37,17 +37,29 @@ Key Input → Input Encoding → PTY
                          GPU Rendering → Screen
 ```
 
-| Module | Role |
-|---|---|
-| Shared Types | Core data types (`Cell`, `Color`, `RenderCommand`, `TerminalCommand`, `KeyEvent`, etc.). Common vocabulary shared across all modules. |
-| Input Encoding | Converts `KeyEvent` (key + modifiers) into PTY-compatible byte sequences using xterm escape codes. Bridges user keyboard input to what the shell process expects. |
-| PTY | Spawns and manages a shell process in a pseudo-terminal (`PtyReader`, `PtyWriter`, `PtyResponder`). Bidirectional I/O bridge — sends encoded input to shell, receives raw output bytes. |
-| VT Parser | Parses raw terminal output bytes via the `vte` crate, emitting `TerminalCommand`s (print, cursor moves, SGR attributes). Converts opaque byte stream into structured, actionable commands. |
-| Grid | 2D cell buffer maintaining cursor position, scrollback history, and current styling state. Applies `TerminalCommand`s sequentially to mutate grid state; exposes `visible_cells()` for rendering. |
-| Render Commands | Converts grid cells + cursor/selection/preedit overlays into `RenderCommand`s, resolving colors to RGB. Final CPU-side preparation — every cell becomes a draw instruction with position, character, colors, and flags. |
-| GPU Rendering | `GlyphAtlas` rasterizes characters to bitmaps; `GpuDrawer` consumes `RenderCommand`s and renders via Metal. Executes the actual visual output on screen using GPU acceleration. |
-| macOS | Native macOS integration: window lifecycle, IME input, event handling, and app delegate. Platform layer that provides native events and bridges them into the app layer. |
-| App | Main event loop coordinator: reads PTY output, dispatches events, orchestrates the full grid → render pipeline. Synchronizes all components and manages timing (frame rate, resize, input delivery). |
+**Shared Types** — Data types shared by all modules (`Cell`, `Color`, `KeyEvent`, etc.). A common language so modules can talk to each other.
+
+**Input Encoding** — Translates keystrokes into bytes the shell understands.
+`Ctrl+C → \x03` · `Arrow Up → \x1b[A`
+
+**PTY** — PTY (Pseudo-Terminal) is a pipe between our app and the shell. Fools the shell into thinking it's connected to a real terminal.
+`\x03 → shell → \x1b[31mHello`
+
+**VT Parser** — Parses the raw bytes from the shell into structured commands.
+`\x1b[31mHi → [SetColor(Red), Print('H'), Print('i')]`
+
+**Grid** — A 2D grid of cells, like a spreadsheet. Stores each character with its position and style. Also keeps scrollback history.
+`[SetColor(Red), Print('H')] → grid[row=0][col=0] = 'H' (red)`
+
+**Render Commands** — Reads the grid and produces a draw list. Adds cursor, selection highlight, and IME overlay on top.
+`grid[0][0]='H'(red) → DrawCell { row:0, col:0, char:'H', fg:#FF0000, bg:#000000 }`
+
+**GPU Rendering** — Takes the draw list and paints pixels on screen using the GPU. Each character becomes a bitmap composited onto the window.
+`DrawCell { char:'H', fg:#FF0000 } → pixels on screen`
+
+**macOS** — Creates the window, receives mouse/keyboard events from the OS, and handles IME (Korean input).
+
+**App** — The conductor. Connects all modules: keystrokes come in, shell output comes back, the grid updates, the screen redraws.
 
 ## Build & Run
 
