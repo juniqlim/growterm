@@ -40,21 +40,27 @@ Key Input → Input Encoding → PTY
 **Shared Types** — Data types shared by all modules (`Cell`, `Color`, `KeyEvent`, etc.). A common language so modules can talk to each other.
 
 **Input Encoding** — Translates keystrokes into bytes the shell understands.
+
 `Ctrl+C → \x03` · `Arrow Up → \x1b[A`
 
 **PTY** — PTY (Pseudo-Terminal) is a pipe between our app and the shell. Fools the shell into thinking it's connected to a real terminal.
+
 `\x03 → shell → \x1b[31mHello`
 
 **VT Parser** — Parses the raw bytes from the shell into structured commands.
+
 `\x1b[31mHi → [SetColor(Red), Print('H'), Print('i')]`
 
 **Grid** — A 2D grid of cells, like a spreadsheet. Stores each character with its position and style. Also keeps scrollback history.
+
 `[SetColor(Red), Print('H')] → grid[row=0][col=0] = 'H' (red)`
 
 **Render Commands** — Reads the grid and produces a draw list. Adds cursor, selection highlight, and IME overlay on top.
+
 `grid[0][0]='H'(red) → DrawCell { row:0, col:0, char:'H', fg:#FF0000, bg:#000000 }`
 
 **GPU Rendering** — Takes the draw list and paints pixels on screen using the GPU. Each character becomes a bitmap composited onto the window.
+
 `DrawCell { char:'H', fg:#FF0000 } → pixels on screen`
 
 **macOS** — Creates the window, receives mouse/keyboard events from the OS, and handles IME (Korean input).
