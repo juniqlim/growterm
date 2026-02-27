@@ -293,7 +293,10 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     let bytes = growterm_input::encode(key_event);
                     // Enter 시 ink commit 폭 리셋
                     if bytes == b"\r" || bytes == b"\n" {
+                        eprintln!("[ENTER] resetting ink_committed_width from {}", ink_committed_width);
                         ink_committed_width = 0;
+                    } else {
+                        eprintln!("[KEY] bytes={:?} ink_committed_width={}", bytes, ink_committed_width);
                     }
                     if let Some(tab) = tabs.active_tab_mut() {
                         let _ = tab.pty_writer.write_all(&bytes);
