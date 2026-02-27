@@ -38,6 +38,10 @@ fn activate_by_pid(pid: u32) {
     std::thread::sleep(Duration::from_millis(500));
 }
 
+fn debug_mode() -> bool {
+    std::env::var("GROWTERM_IME_TRACE_DEBUG").ok().as_deref() == Some("1")
+}
+
 fn send_keystroke(s: &str) {
     let script = format!("tell application \"System Events\" to keystroke \"{s}\"");
     let _ = Command::new("osascript").arg("-e").arg(script).output();
@@ -93,7 +97,9 @@ fn claude_code_hangul_composition_cursor_matches_visible_char_position() {
         "failed to receive initial dump before IME input"
     );
 
-    activate_by_pid(child.id());
+    if debug_mode() {
+        activate_by_pid(child.id());
+    }
 
     let steps: [(char, char); 3] = [('ㅎ', 'ㅎ'), ('ㅏ', '하'), ('ㄴ', '한')];
 
@@ -112,9 +118,11 @@ fn claude_code_hangul_composition_cursor_matches_visible_char_position() {
         let (cursor_row, cursor_col, rows) = parse_dump(&snapshot);
         let positions = find_char_positions(&rows, expected_visible_char);
 
-        eprintln!(
-            "step input='{input}' expect='{expected_visible_char}' cursor=({cursor_row},{cursor_col}) positions={positions:?}"
-        );
+        if debug_mode() {
+            eprintln!(
+                "step input='{input}' expect='{expected_visible_char}' cursor=({cursor_row},{cursor_col}) positions={positions:?}"
+            );
+        }
 
         if positions.is_empty() {
             failures.push(format!(
