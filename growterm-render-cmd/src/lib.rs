@@ -111,7 +111,7 @@ pub fn generate(
     selection: Option<((u16, u16), (u16, u16))>,
     palette: TerminalPalette,
 ) -> Vec<RenderCommand> {
-    generate_with_offset(cells, cursor_pos, preedit, selection, 0, palette)
+    generate_with_offset(cells, cursor_pos, preedit, selection, 0, palette, None)
 }
 
 pub fn generate_with_offset(
@@ -121,6 +121,7 @@ pub fn generate_with_offset(
     selection: Option<((u16, u16), (u16, u16))>,
     row_offset: u16,
     palette: TerminalPalette,
+    preedit_pos_override: Option<(u16, u16)>,
 ) -> Vec<RenderCommand> {
     let mut commands = Vec::new();
     for (row, line) in cells.iter().enumerate() {
@@ -199,7 +200,8 @@ pub fn generate_with_offset(
 
     // Preedit overlay: 커서 위치에 조합 중인 텍스트를 밑줄 + 색반전으로 표시
     if let (Some(text), Some((cursor_row, cursor_col))) = (preedit, cursor_pos) {
-        let mut col = cursor_col;
+        let (preedit_row, preedit_col) = preedit_pos_override.unwrap_or((cursor_row, cursor_col));
+        let mut col = preedit_col;
         for ch in text.chars() {
             let width = ch.width().unwrap_or(1) as u16;
             let flags = CellFlags::UNDERLINE
@@ -210,7 +212,7 @@ pub fn generate_with_offset(
                 };
             commands.push(RenderCommand {
                 col,
-                row: cursor_row + row_offset,
+                row: preedit_row + row_offset,
                 character: ch,
                 fg: palette.default_bg,
                 bg: palette.default_fg,
@@ -639,6 +641,7 @@ mod tests {
             None,
             row_offset,
             TerminalPalette::default(),
+            None,
         );
 
         let cursor_cell = cmds

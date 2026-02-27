@@ -165,7 +165,6 @@ impl Tab {
             palette: TerminalPalette::default(),
         }));
         let dirty = Arc::new(AtomicBool::new(false));
-
         let pty_writer = match growterm_pty::spawn(rows, cols) {
             Ok((reader, writer)) => {
                 let responder = writer.responder();
@@ -201,6 +200,7 @@ fn start_io_thread(
         let mut pending_queries: Vec<u8> = Vec::new();
         let mut kitty_keyboard_flags: u16 = 0;
         let mut kitty_keyboard_stack: Vec<u16> = Vec::new();
+        let mut sync_output = false;
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break,
@@ -251,6 +251,12 @@ fn start_io_thread(
                             TerminalControl::SetDefaultBackgroundColor(color) => {
                                 state.palette.default_bg = color;
                             }
+                            TerminalControl::SyncOutputBegin => {
+                                sync_output = true;
+                            }
+                            TerminalControl::SyncOutputEnd => {
+                                sync_output = false;
+                            }
                         }
                     }
                     drop(state);
@@ -259,8 +265,10 @@ fn start_io_thread(
                         let _ = responder.write_all_flush(response.as_bytes());
                     }
 
-                    dirty.store(true, Ordering::Relaxed);
-                    window.request_redraw();
+                    if !sync_output {
+                        dirty.store(true, Ordering::Relaxed);
+                        window.request_redraw();
+                    }
                 }
                 Err(e) => {
                     if e.raw_os_error() == Some(libc::EIO) {
@@ -292,6 +300,8 @@ enum TerminalControl {
     KittyKeyboardPop(u16),
     SetDefaultForegroundColor(Rgb),
     SetDefaultBackgroundColor(Rgb),
+    SyncOutputBegin,
+    SyncOutputEnd,
 }
 
 fn extract_terminal_controls(pending: &mut Vec<u8>) -> Vec<TerminalControl> {
@@ -309,6 +319,16 @@ fn extract_terminal_controls(pending: &mut Vec<u8>) -> Vec<TerminalControl> {
         if rest.starts_with(b"\x1b[6n") {
             controls.push(TerminalControl::Query(TerminalQuery::CursorPositionReport));
             i += 4;
+            continue;
+        }
+        if rest.starts_with(b"\x1b[?2026h") {
+            controls.push(TerminalControl::SyncOutputBegin);
+            i += 8;
+            continue;
+        }
+        if rest.starts_with(b"\x1b[?2026l") {
+            controls.push(TerminalControl::SyncOutputEnd);
+            i += 8;
             continue;
         }
         if rest.starts_with(b"\x1b[?u") {
@@ -418,6 +438,8 @@ fn extract_terminal_controls(pending: &mut Vec<u8>) -> Vec<TerminalControl> {
 
 fn is_known_control_prefix(rest: &[u8]) -> bool {
     [
+        b"\x1b[?2026h".as_slice(),
+        b"\x1b[?2026l".as_slice(),
         b"\x1b[6n".as_slice(),
         b"\x1b[?u".as_slice(),
         b"\x1b[c".as_slice(),
@@ -896,6 +918,30 @@ mod tests {
             test_palette(),
         );
         assert_eq!(response, "\x1bP1$r0m\x1b\\");
+    }
+
+    #[test]
+    fn extract_terminal_controls_detects_sync_output_begin() {
+        let mut pending = b"\x1b[?2026h".to_vec();
+        let controls = extract_terminal_controls(&mut pending);
+        assert_eq!(controls, vec![TerminalControl::SyncOutputBegin]);
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn extract_terminal_controls_detects_sync_output_end() {
+        let mut pending = b"\x1b[?2026l".to_vec();
+        let controls = extract_terminal_controls(&mut pending);
+        assert_eq!(controls, vec![TerminalControl::SyncOutputEnd]);
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn extract_terminal_controls_keeps_partial_sync_output() {
+        let mut pending = b"\x1b[?2026".to_vec();
+        let controls = extract_terminal_controls(&mut pending);
+        assert!(controls.is_empty());
+        assert_eq!(pending, b"\x1b[?2026");
     }
 
     #[test]

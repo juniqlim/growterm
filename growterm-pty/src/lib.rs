@@ -66,6 +66,10 @@ impl PtyWriter {
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
     }
 
+    pub fn child_pid(&self) -> Option<u32> {
+        self._child.process_id()
+    }
+
     pub fn responder(&self) -> PtyResponder {
         PtyResponder {
             writer: Arc::clone(&self.writer),
