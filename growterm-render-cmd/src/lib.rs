@@ -620,6 +620,42 @@ mod tests {
         assert_eq!(cmds_no_cursor.len(), cmds_no_preedit.len());
     }
 
+    #[test]
+    fn preedit_and_cursor_share_same_row_with_offset() {
+        let cells = vec![vec![
+            Cell {
+                character: '>',
+                ..Cell::default()
+            },
+            Cell::default(),
+            Cell::default(),
+        ]];
+        let row_offset = 1;
+        let cursor = (0, 1);
+        let cmds = super::generate_with_offset(
+            &cells,
+            Some(cursor),
+            Some("하"),
+            None,
+            row_offset,
+            TerminalPalette::default(),
+        );
+
+        let cursor_cell = cmds
+            .iter()
+            .find(|c| c.row == row_offset && c.col == cursor.1 && c.character == ' ')
+            .expect("cursor base cell command not found");
+        assert_eq!(cursor_cell.fg, DEFAULT_BG);
+        assert_eq!(cursor_cell.bg, DEFAULT_FG);
+
+        let preedit_cmd = cmds
+            .iter()
+            .find(|c| c.character == '하')
+            .expect("preedit overlay command not found");
+        assert_eq!(preedit_cmd.row, cursor.0 + row_offset);
+        assert_eq!(preedit_cmd.col, cursor.1);
+    }
+
     // --- BOLD color promotion tests ---
 
     #[test]
