@@ -39,14 +39,15 @@ Key Input → Input Encoding → PTY
 
 | Module | Role |
 |---|---|
-| Shared Types | Cell, Color, RenderCommand, etc. |
-| VT Parser | VT100/xterm escape sequence parsing |
-| Grid | Terminal grid state management |
-| Render Commands | Grid → Render command conversion |
-| GPU Rendering | wgpu-based screen output |
-| Input Encoding | Key input → PTY byte conversion |
-| PTY | Shell process management |
-| App | Event loop, module integration |
+| Shared Types | Core data types (`Cell`, `Color`, `RenderCommand`, `TerminalCommand`, `KeyEvent`, etc.). Common vocabulary shared across all modules. |
+| Input Encoding | Converts `KeyEvent` (key + modifiers) into PTY-compatible byte sequences using xterm escape codes. Bridges user keyboard input to what the shell process expects. |
+| PTY | Spawns and manages a shell process in a pseudo-terminal (`PtyReader`, `PtyWriter`, `PtyResponder`). Bidirectional I/O bridge — sends encoded input to shell, receives raw output bytes. |
+| VT Parser | Parses raw terminal output bytes via the `vte` crate, emitting `TerminalCommand`s (print, cursor moves, SGR attributes). Converts opaque byte stream into structured, actionable commands. |
+| Grid | 2D cell buffer maintaining cursor position, scrollback history, and current styling state. Applies `TerminalCommand`s sequentially to mutate grid state; exposes `visible_cells()` for rendering. |
+| Render Commands | Converts grid cells + cursor/selection/preedit overlays into `RenderCommand`s, resolving colors to RGB. Final CPU-side preparation — every cell becomes a draw instruction with position, character, colors, and flags. |
+| GPU Rendering | `GlyphAtlas` rasterizes characters to bitmaps; `GpuDrawer` consumes `RenderCommand`s and renders via Metal. Executes the actual visual output on screen using GPU acceleration. |
+| macOS | Native macOS integration: window lifecycle, IME input, event handling, and app delegate. Platform layer that provides native events and bridges them into the app layer. |
+| App | Main event loop coordinator: reads PTY output, dispatches events, orchestrates the full grid → render pipeline. Synchronizes all components and manages timing (frame rate, resize, input delivery). |
 
 ## Build & Run
 
