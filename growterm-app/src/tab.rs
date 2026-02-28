@@ -139,6 +139,21 @@ impl TabManager {
         }
     }
 
+    /// Returns the tab index at pixel x, given the screen width.
+    /// Returns `None` if the tab bar is not shown or x is out of range.
+    pub fn tab_index_at_x(&self, x: f32, screen_w: f32) -> Option<usize> {
+        if !self.show_tab_bar() || self.tabs.is_empty() || screen_w <= 0.0 {
+            return None;
+        }
+        let tab_w = screen_w / self.tabs.len() as f32;
+        let index = (x / tab_w) as usize;
+        if index < self.tabs.len() {
+            Some(index)
+        } else {
+            None
+        }
+    }
+
     pub fn tab_bar_info(&self) -> TabBarInfo {
         TabBarInfo {
             titles: (1..=self.tabs.len())
@@ -961,5 +976,35 @@ mod tests {
             ]
         );
         assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn tab_index_at_x_returns_none_when_single_tab() {
+        let mut mgr = TabManager::new();
+        mgr.add_tab(dummy_tab());
+        assert_eq!(mgr.tab_index_at_x(50.0, 800.0), None);
+    }
+
+    #[test]
+    fn tab_index_at_x_returns_correct_index() {
+        let mut mgr = TabManager::new();
+        mgr.add_tab(dummy_tab());
+        mgr.add_tab(dummy_tab());
+        mgr.add_tab(dummy_tab());
+        // screen_w=900, 3 tabs => each tab is 300px wide
+        assert_eq!(mgr.tab_index_at_x(0.0, 900.0), Some(0));
+        assert_eq!(mgr.tab_index_at_x(150.0, 900.0), Some(0));
+        assert_eq!(mgr.tab_index_at_x(299.0, 900.0), Some(0));
+        assert_eq!(mgr.tab_index_at_x(300.0, 900.0), Some(1));
+        assert_eq!(mgr.tab_index_at_x(600.0, 900.0), Some(2));
+        assert_eq!(mgr.tab_index_at_x(899.0, 900.0), Some(2));
+    }
+
+    #[test]
+    fn tab_index_at_x_out_of_range() {
+        let mut mgr = TabManager::new();
+        mgr.add_tab(dummy_tab());
+        mgr.add_tab(dummy_tab());
+        assert_eq!(mgr.tab_index_at_x(800.0, 800.0), None);
     }
 }

@@ -264,6 +264,17 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
             }
             AppEvent::MouseDown(x, y, modifiers) => {
                 let (cw, ch) = drawer.cell_size();
+
+                // Tab bar click: switch to clicked tab
+                if tabs.show_tab_bar() && (y as f32) < ch {
+                    let screen_w = window.inner_size().0 as f32;
+                    if let Some(index) = tabs.tab_index_at_x(x as f32, screen_w) {
+                        tabs.switch_to(index);
+                        window.request_redraw();
+                    }
+                    continue;
+                }
+
                 let (screen_row, col) =
                     selection::pixel_to_cell(x as f32, y as f32 - tabs.mouse_y_offset(ch), cw, ch);
                 let abs_row = if let Some(tab) = tabs.active_tab() {
