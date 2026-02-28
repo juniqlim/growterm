@@ -250,6 +250,8 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     let bytes = growterm_input::encode(key_event);
                     if bytes == b"\r" || bytes == b"\n" {
                         ink_state.on_enter();
+                    } else {
+                        ink_state.on_key_input(&bytes);
                     }
                     if let Some(tab) = tabs.active_tab_mut() {
                         let _ = tab.pty_writer.write_all(&bytes);
@@ -502,9 +504,8 @@ fn render_with_tabs(drawer: &mut GpuDrawer, tabs: &TabManager, preedit: &str, se
     let show_tab_bar = tabs.show_tab_bar();
     let (cell_w, cell_h) = drawer.cell_size();
     let row_offset = if show_tab_bar { 1 } else { 0 };
-    let cols_per_row = visible.first().map_or(80, |r| r.len()) as u16;
     let preedit_pos_override = if preedit_str.is_some() {
-        ink_state.preedit_pos(&visible, cols_per_row)
+        ink_state.preedit_pos(&visible)
     } else {
         None
     };
