@@ -471,10 +471,11 @@ fn render_with_tabs(drawer: &mut GpuDrawer, tabs: &TabManager, preedit: &str, se
 
     let state = tab.terminal.lock().unwrap();
     let scrolled = state.grid.scroll_offset() > 0;
-    let cursor = if scrolled {
+    let cursor_pos = state.grid.cursor_pos();
+    let cursor = if scrolled || !state.grid.cursor_visible() {
         None
     } else {
-        Some(state.grid.cursor_pos())
+        Some(cursor_pos)
     };
     let preedit_str = if preedit.is_empty() || scrolled {
         None
@@ -517,6 +518,7 @@ fn render_with_tabs(drawer: &mut GpuDrawer, tabs: &TabManager, preedit: &str, se
         row_offset,
         state.palette,
         preedit_pos_override,
+        if scrolled { None } else { Some(cursor_pos) },
     );
     drop(state);
 

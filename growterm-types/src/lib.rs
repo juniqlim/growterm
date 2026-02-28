@@ -113,6 +113,8 @@ pub enum TerminalCommand {
     Tab,
     Bell,
     DeleteChars(u16),
+    ShowCursor,
+    HideCursor,
 }
 
 // --- Key & Modifiers ---

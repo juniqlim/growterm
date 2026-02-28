@@ -1,3 +1,4 @@
 [workspace]
 members = ["growterm-*"]
+exclude = ["growterm-integration-tests"]
 resolver = "2"

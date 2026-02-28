@@ -868,3 +868,18 @@ fn scroll_up_view_clamps_to_scrollback_len() {
     grid.scroll_up_view(100);
     assert_eq!(grid.scroll_offset(), 1);
 }
+
+#[test]
+fn cursor_visible_default_true() {
+    let grid = Grid::new(10, 5);
+    assert!(grid.cursor_visible());
+}
+
+#[test]
+fn hide_cursor_then_show_cursor() {
+    let mut grid = Grid::new(10, 5);
+    grid.apply(&TerminalCommand::HideCursor);
+    assert!(!grid.cursor_visible());
+    grid.apply(&TerminalCommand::ShowCursor);
+    assert!(grid.cursor_visible());
+}

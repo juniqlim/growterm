@@ -158,11 +158,22 @@ impl vte::Perform for Handler {
     fn csi_dispatch(
         &mut self,
         params: &vte::Params,
-        _intermediates: &[u8],
+        intermediates: &[u8],
         _ignore: bool,
         action: char,
     ) {
         let first = params.iter().next().map(|p| p[0]).unwrap_or(0);
+
+        // Private mode sequences (CSI ? ... h/l)
+        if intermediates == [b'?'] {
+            match action {
+                'h' if first == 25 => self.commands.push(TerminalCommand::ShowCursor),
+                'l' if first == 25 => self.commands.push(TerminalCommand::HideCursor),
+                _ => {}
+            }
+            return;
+        }
+
         match action {
             'A' => self.commands.push(TerminalCommand::CursorUp(first.max(1))),
             'B' => self
@@ -674,6 +685,22 @@ mod tests {
         let mut parser = VtParser::new();
         let cmds = parser.parse(b"\x1b[P");
         assert_eq!(cmds, vec![TerminalCommand::DeleteChars(1)]);
+    }
+
+    // --- DECTCEM (cursor visibility) ---
+
+    #[test]
+    fn parse_hide_cursor() {
+        let mut parser = VtParser::new();
+        let cmds = parser.parse(b"\x1b[?25l");
+        assert_eq!(cmds, vec![TerminalCommand::HideCursor]);
+    }
+
+    #[test]
+    fn parse_show_cursor() {
+        let mut parser = VtParser::new();
+        let cmds = parser.parse(b"\x1b[?25h");
+        assert_eq!(cmds, vec![TerminalCommand::ShowCursor]);
     }
 
     // --- Mixed content ---

@@ -14,6 +14,7 @@ pub struct Grid {
     current_flags: CellFlags,
     scrollback: Vec<Vec<Cell>>,
     scroll_offset: usize,
+    cursor_visible: bool,
 }
 
 impl Grid {
@@ -31,6 +32,7 @@ impl Grid {
             current_flags: CellFlags::empty(),
             scrollback: Vec::new(),
             scroll_offset: 0,
+            cursor_visible: true,
         }
     }
 
@@ -40,6 +42,10 @@ impl Grid {
 
     pub fn cursor_pos(&self) -> (u16, u16) {
         (self.cursor_row as u16, self.cursor_col as u16)
+    }
+
+    pub fn cursor_visible(&self) -> bool {
+        self.cursor_visible
     }
 
     pub fn apply(&mut self, cmd: &TerminalCommand) {
@@ -93,6 +99,8 @@ impl Grid {
                 }
             }
             TerminalCommand::Bell => {}
+            TerminalCommand::ShowCursor => self.cursor_visible = true,
+            TerminalCommand::HideCursor => self.cursor_visible = false,
             TerminalCommand::DeleteChars(n) => self.delete_chars(*n),
             TerminalCommand::EraseInLine(mode) => self.erase_in_line(*mode),
             TerminalCommand::EraseInDisplay(mode) => self.erase_in_display(*mode),
