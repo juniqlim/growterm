@@ -75,18 +75,37 @@ impl InkImeState {
 
     /// Calculate overridden preedit position for Ink apps.
     ///
-    /// Uses cell scanning to find the last non-blank content, then adds
-    /// tracked trailing spaces (which are indistinguishable from padding
-    /// in the cell grid).
+    /// Ink renders its cursor as an INVERSE cell. We find that cell in the
+    /// input area and use its position. Falls back to cell content scan
+    /// with trailing space tracking when no INVERSE cell is found.
     pub fn preedit_pos(&self, cells: &[Vec<Cell>]) -> Option<(u16, u16)> {
         if !self.is_active() {
             return None;
         }
         let prompt_row = find_prompt_row(cells)?;
         let bottom = find_input_bottom(cells, prompt_row);
+
+        // Primary: find Ink's INVERSE cursor cell
+        if let Some(pos) = find_ink_cursor(cells, prompt_row, bottom) {
+            return Some(pos);
+        }
+
+        // Fallback: content scan + trailing spaces
         let (row, col) = find_input_end(cells, prompt_row, bottom);
         Some((row, col + self.trailing_spaces))
     }
+}
+
+/// Find Ink's cursor (INVERSE cell) in the input area.
+fn find_ink_cursor(cells: &[Vec<Cell>], prompt_row: usize, bottom: usize) -> Option<(u16, u16)> {
+    for row_idx in (prompt_row..=bottom).rev() {
+        for (col, cell) in cells[row_idx].iter().enumerate() {
+            if cell.flags.contains(CellFlags::INVERSE) {
+                return Some((row_idx as u16, col as u16));
+            }
+        }
+    }
+    None
 }
 
 /// Find the row index of the last input row (before the next separator).
@@ -178,6 +197,15 @@ fn find_prompt_row(cells: &[Vec<Cell>]) -> Option<usize> {
         .filter(|(_, row)| is_separator(row))
         .map(|(i, _)| i)
         .collect();
+    // Check after the last separator first (new prompt may lack bottom separator)
+    if let Some(&last_sep) = separators.last() {
+        for row_idx in (last_sep + 1)..cells.len() {
+            if cells[row_idx].iter().any(|c| c.character == '❯') {
+                return Some(row_idx);
+            }
+        }
+    }
+    // Fall back to between separator pairs (from bottom)
     for window in separators.windows(2).rev() {
         let (top, bottom) = (window[0], window[1]);
         for row_idx in (top + 1)..bottom {
@@ -252,6 +280,33 @@ mod tests {
     }
 
     #[test]
+    fn find_prompt_row_after_last_separator() {
+        // New prompt after Enter — bottom separator not yet drawn
+        let cells = vec![
+            make_row("─────", 80),
+            make_row("❯ old input", 80),
+            make_row("─────", 80),
+            make_row("output", 80),
+            make_row("─────", 80),
+            make_row("❯ ", 80),
+        ];
+        assert_eq!(find_prompt_row(&cells), Some(5));
+    }
+
+    #[test]
+    fn find_prompt_row_prefers_after_last_separator() {
+        // Both old prompt (between separators) and new prompt (after last separator)
+        let cells = vec![
+            make_row("─────", 80),
+            make_row("❯ old", 80),
+            make_row("─────", 80),
+            make_row("❯ new", 80),
+        ];
+        // Should prefer row 3 (after last separator)
+        assert_eq!(find_prompt_row(&cells), Some(3));
+    }
+
+    #[test]
     fn find_prompt_row_no_prompt() {
         let cells = vec![
             make_row("─────", 80),
@@ -261,7 +316,40 @@ mod tests {
         assert_eq!(find_prompt_row(&cells), None);
     }
 
-    // --- preedit_pos with cell scan ---
+    fn set_inverse(row: &mut Vec<Cell>, col: usize) {
+        row[col].flags |= CellFlags::INVERSE;
+    }
+
+    // --- preedit_pos ---
+
+    #[test]
+    fn preedit_pos_uses_inverse_cursor() {
+        let state = active_state();
+        let mut row1 = make_row_with_wide(&[("❯ ", false), ("하이", true)], 80);
+        let mut row2 = make_row("  ", 80);
+        set_inverse(&mut row2, 2); // Ink cursor at col 2 on empty line
+        let cells = vec![
+            make_row("─────", 80),
+            row1,
+            row2,
+            make_row("─────", 80),
+        ];
+        // Should use INVERSE cell position, not content scan
+        assert_eq!(state.preedit_pos(&cells), Some((2, 2)));
+    }
+
+    #[test]
+    fn preedit_pos_inverse_cursor_after_content() {
+        let state = active_state();
+        let mut row1 = make_row_with_wide(&[("❯ ", false), ("하이", true)], 80);
+        set_inverse(&mut row1, 6); // Ink cursor right after content
+        let cells = vec![
+            make_row("─────", 80),
+            row1,
+            make_row("─────", 80),
+        ];
+        assert_eq!(state.preedit_pos(&cells), Some((1, 6)));
+    }
 
     #[test]
     fn preedit_pos_not_active() {
