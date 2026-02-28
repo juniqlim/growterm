@@ -73,8 +73,11 @@ define_class! {
         fn perform_key_equivalent(&self, event: &NSEvent) -> objc2::runtime::Bool {
             let flags = event.modifierFlags();
             if flags.contains(NSEventModifierFlags::Command) {
-                // Cmd+Q는 메뉴(terminate:)로 처리
-                if event.keyCode() == crate::key_convert::keycode::ANSI_Q {
+                // Cmd+Q는 메뉴(terminate:)로, Cmd+P는 메뉴(togglePomodoro:)로 처리
+                let kc = event.keyCode();
+                if kc == crate::key_convert::keycode::ANSI_Q
+                    || kc == crate::key_convert::keycode::ANSI_P
+                {
                     return objc2::runtime::Bool::NO;
                 }
                 self.dispatch_key_event(event);
@@ -182,6 +185,11 @@ define_class! {
                 self.ivars().pending_resize.set(None);
                 self.send_event(AppEvent::Resize(w, h));
             }
+        }
+
+        #[unsafe(method(togglePomodoro:))]
+        fn toggle_pomodoro(&self, _sender: &AnyObject) {
+            self.send_event(AppEvent::TogglePomodoro);
         }
 
         #[unsafe(method(viewDidChangeBackingProperties))]

@@ -32,6 +32,7 @@ pub struct GpuDrawer {
     surface_config: wgpu::SurfaceConfiguration,
     render_format: wgpu::TextureFormat,
     bg_pipeline: wgpu::RenderPipeline,
+    overlay_pipeline: wgpu::RenderPipeline,
     glyph_pipeline: wgpu::RenderPipeline,
     uniform_buffer: wgpu::Buffer,
     uniform_bind_group: wgpu::BindGroup,
@@ -266,6 +267,49 @@ impl GpuDrawer {
             cache: None,
         });
 
+        // Overlay pipeline (same vertex layout as bg, with alpha blending)
+        let overlay_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("overlay_shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/overlay.wgsl").into()),
+        });
+
+        let overlay_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("overlay_pipeline"),
+            layout: Some(&bg_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &overlay_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<BgVertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x3],
+                }],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &overlay_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: render_format,
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::SrcAlpha,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent::OVER,
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
         // Glyph pipeline
         let glyph_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("glyph_shader"),
@@ -325,6 +369,7 @@ impl GpuDrawer {
             surface_config,
             render_format,
             bg_pipeline,
+            overlay_pipeline,
             glyph_pipeline,
             uniform_buffer,
             uniform_bind_group,
@@ -369,6 +414,7 @@ impl GpuDrawer {
         commands: &[RenderCommand],
         scrollbar: Option<(f32, f32)>,
         tab_bar: Option<&TabBarInfo>,
+        is_break: bool,
     ) {
         if self.surface_dirty {
             self.surface_dirty = false;
@@ -396,6 +442,7 @@ impl GpuDrawer {
 
         // Build bg vertices
         let mut bg_vertices: Vec<BgVertex> = Vec::new();
+
         for cmd in commands {
             let x = cmd.col as f32 * cell_w;
             let y = cmd.row as f32 * cell_h;
@@ -775,6 +822,23 @@ impl GpuDrawer {
                 pass.set_bind_group(1, &self.glyph_texture_bind_group, &[]);
                 pass.set_vertex_buffer(0, glyph_buffer.slice(..));
                 pass.draw(0..glyph_vertices.len() as u32, 0..1);
+            }
+
+            // Pass 3: break overlay (semi-transparent red tint over everything)
+            if is_break {
+                let screen_w = self.surface_config.width as f32;
+                let screen_h = self.surface_config.height as f32;
+                let mut overlay_verts: Vec<BgVertex> = Vec::new();
+                push_bg_rect(&mut overlay_verts, 0.0, 0.0, screen_w, screen_h, [0.6, 0.0, 0.0]);
+                let overlay_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("overlay_vb"),
+                    contents: bytemuck::cast_slice(&overlay_verts),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+                pass.set_pipeline(&self.overlay_pipeline);
+                pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+                pass.set_vertex_buffer(0, overlay_buffer.slice(..));
+                pass.draw(0..overlay_verts.len() as u32, 0..1);
             }
         }
 

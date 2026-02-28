@@ -1,5 +1,6 @@
 mod app;
 mod ink_workaround;
+mod pomodoro;
 #[allow(dead_code)]
 mod selection;
 mod tab;

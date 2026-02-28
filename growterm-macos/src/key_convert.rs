@@ -23,6 +23,7 @@ pub mod keycode {
     pub const ANSI_MINUS: u16 = 0x1B;
     pub const ANSI_T: u16 = 0x11;
     pub const ANSI_W: u16 = 0x0D;
+    pub const ANSI_P: u16 = 0x23;
     pub const ANSI_LEFT_BRACKET: u16 = 0x21;
     pub const ANSI_RIGHT_BRACKET: u16 = 0x1E;
     pub const ANSI_1: u16 = 0x12;

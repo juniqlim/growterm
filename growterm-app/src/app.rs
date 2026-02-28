@@ -6,6 +6,7 @@ use growterm_gpu_draw::{GpuDrawer, TabBarInfo};
 use growterm_macos::{AppEvent, MacWindow, Modifiers};
 
 use crate::ink_workaround::InkImeState;
+use crate::pomodoro::Pomodoro;
 use crate::selection::{self, Selection};
 use crate::tab::{Tab, TabManager};
 use crate::url;
@@ -31,6 +32,17 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
         }
     }
 
+    // Periodic 1-second redraw for pomodoro timer display
+    {
+        let w = window.clone();
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                w.request_redraw();
+            }
+        });
+    }
+
     let mut preedit = String::new();
     let mut prev_preedit = String::new();
     let mut sel = Selection::default();
@@ -42,6 +54,10 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
     let mut test_input_sent = false;
     let mut test_drop_sent = false;
     let mut ink_state = InkImeState::new();
+    let mut pomodoro = Pomodoro::new();
+    if load_pomodoro_enabled() {
+        pomodoro.toggle();
+    }
     // hover_url_range: (abs_row, start_col, end_col) for Cmd+hover URL underline
     let mut hover_url_range: Option<(u32, u16, u16)> = None;
 
@@ -58,6 +74,10 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
             AppEvent::TextCommit(text) => {
                 preedit.clear();
                 ink_state.on_text_commit(&text);
+                if pomodoro.is_input_blocked() {
+                    continue;
+                }
+                pomodoro.on_input();
                 if let Some(tab) = tabs.active_tab_mut() {
                     let _ = tab.pty_writer.write_all(text.as_bytes());
                     let _ = tab.pty_writer.flush();
@@ -104,7 +124,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                             }
                             Err(e) => eprintln!("Failed to spawn tab: {e}"),
                         }
-                        render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range);
+                        render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range, pomodoro.is_input_blocked());
                         continue;
                     }
 
@@ -129,7 +149,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                                 let _ = t.pty_writer.resize(rows, cols);
                             }
                         }
-                        render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range);
+                        render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range, pomodoro.is_input_blocked());
                         continue;
                     }
 
@@ -139,14 +159,14 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                             tabs.prev_tab();
                             sel.clear();
                             preedit.clear();
-                            render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range);
+                            render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range, pomodoro.is_input_blocked());
                             continue;
                         }
                         if keycode == kc::ANSI_RIGHT_BRACKET {
                             tabs.next_tab();
                             sel.clear();
                             preedit.clear();
-                            render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range);
+                            render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range, pomodoro.is_input_blocked());
                             continue;
                         }
                     }
@@ -169,7 +189,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                             tabs.switch_to(idx);
                             sel.clear();
                             preedit.clear();
-                            render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range);
+                            render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range, pomodoro.is_input_blocked());
                         }
                         continue;
                     }
@@ -185,7 +205,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                                 state.grid.scroll_down_view(row_count);
                             }
                         }
-                        render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range);
+                        render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range, pomodoro.is_input_blocked());
                         continue;
                     }
 
@@ -241,16 +261,20 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                             drop(state);
                             let _ = tab.pty_writer.resize(term_rows, cols);
                         }
-                        render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range);
+                        render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range, pomodoro.is_input_blocked());
                         continue;
                     }
                     continue;
                 }
 
+                if pomodoro.is_input_blocked() {
+                    continue;
+                }
                 if let Some(key_event) =
                     growterm_macos::convert_key(keycode, characters.as_deref(), modifiers)
                 {
                     let bytes = growterm_input::encode(key_event);
+                    pomodoro.on_input();
                     if bytes == b"\r" || bytes == b"\n" {
                         ink_state.on_enter();
                     } else {
@@ -399,7 +423,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                             state.grid.scroll_down_view((-lines) as usize);
                         }
                     }
-                    render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range);
+                    render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range, pomodoro.is_input_blocked());
                 }
             }
             AppEvent::Resize(mut w, mut h) => {
@@ -426,9 +450,10 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     drop(state);
                     let _ = tab.pty_writer.resize(term_rows, cols);
                 }
-                render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range);
+                render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range, pomodoro.is_input_blocked());
             }
             AppEvent::RedrawRequested => {
+                pomodoro.tick();
                 let was_dirty = tabs
                     .active_tab()
                     .map_or(false, |t| t.dirty.swap(false, Ordering::Relaxed));
@@ -436,7 +461,13 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                 if preedit_changed {
                     prev_preedit = preedit.clone();
                 }
-                render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range);
+                // Update window title with pomodoro timer
+                let title = match pomodoro.display_text() {
+                    Some(t) => t,
+                    None => "growterm".to_string(),
+                };
+                window.set_title(&title);
+                render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range, pomodoro.is_input_blocked());
                 if was_dirty || preedit_changed {
                     if let Some(ref path) = grid_dump_path {
                         let dump_file = std::path::Path::new(path);
@@ -514,6 +545,15 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     let _ = tab.pty_writer.flush();
                 }
             }
+            AppEvent::TogglePomodoro => {
+                pomodoro.toggle();
+                save_pomodoro_enabled(pomodoro.is_enabled());
+                let title = match pomodoro.display_text() {
+                    Some(t) => t,
+                    None => "growterm".to_string(),
+                };
+                window.set_title(&title);
+            }
             AppEvent::CloseRequested => {
                 std::process::exit(0);
             }
@@ -521,6 +561,28 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
     }
 }
 
+
+fn pomodoro_config_path() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    std::path::PathBuf::from(home)
+        .join(".config")
+        .join("growterm")
+        .join("pomodoro_enabled")
+}
+
+fn load_pomodoro_enabled() -> bool {
+    std::fs::read_to_string(pomodoro_config_path())
+        .map(|s| s.trim() == "1")
+        .unwrap_or(false)
+}
+
+fn save_pomodoro_enabled(enabled: bool) {
+    let path = pomodoro_config_path();
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(path, if enabled { "1" } else { "0" });
+}
 
 fn shell_escape(path: &str) -> String {
     if path.contains(|c: char| c.is_whitespace() || "\"'\\$`!#&|;(){}[]<>?*~".contains(c)) {
@@ -530,7 +592,7 @@ fn shell_escape(path: &str) -> String {
     }
 }
 
-fn render_with_tabs(drawer: &mut GpuDrawer, tabs: &TabManager, preedit: &str, sel: &Selection, ink_state: &InkImeState, hover_url_range: Option<(u32, u16, u16)>) {
+fn render_with_tabs(drawer: &mut GpuDrawer, tabs: &TabManager, preedit: &str, sel: &Selection, ink_state: &InkImeState, hover_url_range: Option<(u32, u16, u16)>, is_break: bool) {
     let tab = match tabs.active_tab() {
         Some(t) => t,
         None => return,
@@ -613,7 +675,7 @@ fn render_with_tabs(drawer: &mut GpuDrawer, tabs: &TabManager, preedit: &str, se
         None
     };
 
-    drawer.draw(&commands, scrollbar, tab_bar.as_ref());
+    drawer.draw(&commands, scrollbar, tab_bar.as_ref(), is_break);
 }
 
 #[cfg(test)]

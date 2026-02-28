@@ -12,6 +12,23 @@ extern "C" {
     fn dispatch_async_f(queue: *const c_void, context: *mut c_void, work: extern "C" fn(*mut c_void));
 }
 
+extern "C" fn dispatch_trampoline(ctx: *mut c_void) {
+    let closure: Box<Box<dyn FnOnce()>> = unsafe { Box::from_raw(ctx as *mut _) };
+    closure();
+}
+
+fn dispatch_async_main<F: FnOnce() + 'static>(f: F) {
+    let boxed: Box<Box<dyn FnOnce()>> = Box::new(Box::new(f));
+    let ptr = Box::into_raw(boxed) as *mut c_void;
+    unsafe {
+        dispatch_async_f(
+            &_dispatch_main_q as *const _ as *const c_void,
+            ptr,
+            dispatch_trampoline,
+        );
+    }
+}
+
 extern "C" fn set_needs_display_on_main(ctx: *mut c_void) {
     unsafe {
         let view: *mut objc2::runtime::AnyObject = ctx as *mut _;
@@ -81,6 +98,19 @@ impl MacWindow {
         let ptr = Retained::as_ptr(&self.view) as *mut c_void;
         unsafe {
             dispatch_async_f(&_dispatch_main_q as *const _ as *const c_void, ptr, set_needs_display_on_main);
+        }
+    }
+
+    pub fn set_title(&self, title: &str) {
+        let raw: *const NSWindow = Retained::as_ptr(&self.ns_window);
+        let title = title.to_owned();
+        unsafe {
+            let raw = raw as usize;
+            dispatch_async_main(move || {
+                let window = raw as *const NSWindow;
+                let ns_title = NSString::from_str(&title);
+                (*window).setTitle(&ns_title);
+            });
         }
     }
 

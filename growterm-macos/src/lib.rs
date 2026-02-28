@@ -67,9 +67,10 @@ fn setup_main_menu(app: &NSApplication) {
     let mtm = MainThreadMarker::new().unwrap();
     unsafe {
         let menubar = NSMenu::new(mtm);
+
+        // App menu
         let app_menu_item = NSMenuItem::new(mtm);
         menubar.addItem(&app_menu_item);
-        app.setMainMenu(Some(&menubar));
 
         let app_menu = NSMenu::new(mtm);
         let quit_title = NSString::from_str("Quit growTerm");
@@ -82,6 +83,24 @@ fn setup_main_menu(app: &NSApplication) {
         );
         app_menu.addItem(&quit_item);
         app_menu_item.setSubmenu(Some(&app_menu));
+
+        // View menu
+        let view_menu_item = NSMenuItem::new(mtm);
+        menubar.addItem(&view_menu_item);
+
+        let view_menu = NSMenu::initWithTitle(mtm.alloc(), &NSString::from_str("View"));
+        let pomodoro_title = NSString::from_str("Pomodoro Timer");
+        let pomodoro_key = NSString::from_str("p");
+        let pomodoro_item = NSMenuItem::initWithTitle_action_keyEquivalent(
+            mtm.alloc(),
+            &pomodoro_title,
+            Some(objc2::sel!(togglePomodoro:)),
+            &pomodoro_key,
+        );
+        view_menu.addItem(&pomodoro_item);
+        view_menu_item.setSubmenu(Some(&view_menu));
+
+        app.setMainMenu(Some(&menubar));
     }
 }
 

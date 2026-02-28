@@ -25,6 +25,8 @@ pub enum AppEvent {
     MouseMoved(f64, f64, Modifiers),
     /// 파일 드래그 앤 드롭 (파일 경로 목록)
     FileDropped(Vec<String>),
+    /// 뽀모도로 타이머 토글
+    TogglePomodoro,
 }
 
 bitflags::bitflags! {
