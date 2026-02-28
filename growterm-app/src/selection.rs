@@ -177,6 +177,35 @@ pub fn extract_text_absolute(grid: &growterm_grid::Grid, selection: &Selection) 
     result
 }
 
+/// Extract a single row's text using absolute row coordinate (scrollback + screen).
+pub fn row_text_absolute(grid: &growterm_grid::Grid, abs_row: u32) -> String {
+    let scrollback = grid.scrollback();
+    let screen = grid.cells();
+    let sb_len = scrollback.len() as u32;
+
+    let line: &[Cell] = if abs_row < sb_len {
+        &scrollback[abs_row as usize]
+    } else {
+        let screen_row = (abs_row - sb_len) as usize;
+        if screen_row >= screen.len() {
+            return String::new();
+        }
+        &screen[screen_row]
+    };
+
+    let mut text = String::new();
+    for cell in line {
+        if cell.flags.contains(CellFlags::WIDE_CHAR) {
+            text.push(cell.character);
+        } else if cell.character == '\0' {
+            text.push(' ');
+        } else {
+            text.push(cell.character);
+        }
+    }
+    text
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

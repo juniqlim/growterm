@@ -8,6 +8,7 @@ use growterm_macos::{AppEvent, MacWindow, Modifiers};
 use crate::ink_workaround::InkImeState;
 use crate::selection::{self, Selection};
 use crate::tab::{Tab, TabManager};
+use crate::url;
 use crate::zoom;
 
 pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: GpuDrawer) {
@@ -41,6 +42,8 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
     let mut test_input_sent = false;
     let mut test_drop_sent = false;
     let mut ink_state = InkImeState::new();
+    // hover_url_range: (abs_row, start_col, end_col) for Cmd+hover URL underline
+    let mut hover_url_range: Option<(u32, u16, u16)> = None;
 
     loop {
         let event = if let Some(evt) = deferred.take() {
@@ -101,7 +104,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                             }
                             Err(e) => eprintln!("Failed to spawn tab: {e}"),
                         }
-                        render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state);
+                        render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range);
                         continue;
                     }
 
@@ -126,7 +129,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                                 let _ = t.pty_writer.resize(rows, cols);
                             }
                         }
-                        render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state);
+                        render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range);
                         continue;
                     }
 
@@ -136,14 +139,14 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                             tabs.prev_tab();
                             sel.clear();
                             preedit.clear();
-                            render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state);
+                            render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range);
                             continue;
                         }
                         if keycode == kc::ANSI_RIGHT_BRACKET {
                             tabs.next_tab();
                             sel.clear();
                             preedit.clear();
-                            render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state);
+                            render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range);
                             continue;
                         }
                     }
@@ -166,7 +169,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                             tabs.switch_to(idx);
                             sel.clear();
                             preedit.clear();
-                            render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state);
+                            render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range);
                         }
                         continue;
                     }
@@ -182,7 +185,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                                 state.grid.scroll_down_view(row_count);
                             }
                         }
-                        render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state);
+                        render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range);
                         continue;
                     }
 
@@ -238,7 +241,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                             drop(state);
                             let _ = tab.pty_writer.resize(term_rows, cols);
                         }
-                        render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state);
+                        render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range);
                         continue;
                     }
                     continue;
@@ -259,7 +262,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     }
                 }
             }
-            AppEvent::MouseDown(x, y) => {
+            AppEvent::MouseDown(x, y, modifiers) => {
                 let (cw, ch) = drawer.cell_size();
                 let (screen_row, col) =
                     selection::pixel_to_cell(x as f32, y as f32 - tabs.mouse_y_offset(ch), cw, ch);
@@ -273,6 +276,24 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                 } else {
                     screen_row as u32
                 };
+
+                // Cmd+Click: open URL under cursor
+                if modifiers.contains(Modifiers::SUPER) {
+                    if let Some(tab) = tabs.active_tab() {
+                        let state = tab.terminal.lock().unwrap();
+                        let row_text = selection::row_text_absolute(&state.grid, abs_row);
+                        drop(state);
+                        if let Some(found_url) = url::find_url_at(&row_text, col as usize) {
+                            let _ = std::process::Command::new("open")
+                                .arg(found_url)
+                                .spawn();
+                        }
+                    }
+                    hover_url_range = None;
+                    window.request_redraw();
+                    continue;
+                }
+
                 sel.begin(abs_row, col);
                 window.request_redraw();
             }
@@ -317,6 +338,41 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                 sel.finish();
                 window.request_redraw();
             }
+            AppEvent::MouseMoved(x, y, modifiers) => {
+                let new_range = if modifiers.contains(Modifiers::SUPER) {
+                    let (cw, ch) = drawer.cell_size();
+                    let (screen_row, col) = selection::pixel_to_cell(
+                        x as f32,
+                        y as f32 - tabs.mouse_y_offset(ch),
+                        cw,
+                        ch,
+                    );
+                    if let Some(tab) = tabs.active_tab() {
+                        let state = tab.terminal.lock().unwrap();
+                        let base = state
+                            .grid
+                            .scrollback_len()
+                            .saturating_sub(state.grid.scroll_offset());
+                        let abs_row = screen_row as u32 + base as u32;
+                        let row_text = selection::row_text_absolute(&state.grid, abs_row);
+                        drop(state);
+                        if let Some((start, end)) = url::find_url_range_at(&row_text, col as usize)
+                        {
+                            Some((abs_row, start as u16, end as u16))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                if new_range != hover_url_range {
+                    hover_url_range = new_range;
+                    window.request_redraw();
+                }
+            }
             AppEvent::ScrollWheel(delta_y) => {
                 scroll_accum += delta_y;
                 let (_, ch) = drawer.cell_size();
@@ -332,7 +388,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                             state.grid.scroll_down_view((-lines) as usize);
                         }
                     }
-                    render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state);
+                    render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range);
                 }
             }
             AppEvent::Resize(mut w, mut h) => {
@@ -359,7 +415,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     drop(state);
                     let _ = tab.pty_writer.resize(term_rows, cols);
                 }
-                render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state);
+                render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range);
             }
             AppEvent::RedrawRequested => {
                 let was_dirty = tabs
@@ -369,7 +425,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                 if preedit_changed {
                     prev_preedit = preedit.clone();
                 }
-                render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state);
+                render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range);
                 if was_dirty || preedit_changed {
                     if let Some(ref path) = grid_dump_path {
                         let dump_file = std::path::Path::new(path);
@@ -463,7 +519,7 @@ fn shell_escape(path: &str) -> String {
     }
 }
 
-fn render_with_tabs(drawer: &mut GpuDrawer, tabs: &TabManager, preedit: &str, sel: &Selection, ink_state: &InkImeState) {
+fn render_with_tabs(drawer: &mut GpuDrawer, tabs: &TabManager, preedit: &str, sel: &Selection, ink_state: &InkImeState, hover_url_range: Option<(u32, u16, u16)>) {
     let tab = match tabs.active_tab() {
         Some(t) => t,
         None => return,
@@ -510,7 +566,7 @@ fn render_with_tabs(drawer: &mut GpuDrawer, tabs: &TabManager, preedit: &str, se
     } else {
         None
     };
-    let commands = growterm_render_cmd::generate_with_offset(
+    let mut commands = growterm_render_cmd::generate_with_offset(
         &visible,
         cursor,
         preedit_str,
@@ -520,6 +576,19 @@ fn render_with_tabs(drawer: &mut GpuDrawer, tabs: &TabManager, preedit: &str, se
         preedit_pos_override,
         if scrolled { None } else { Some(cursor_pos) },
     );
+
+    // Post-process: add UNDERLINE flag for hover URL range
+    if let Some((abs_row, start_col, end_col)) = hover_url_range {
+        if abs_row >= view_base && abs_row < view_base + visible_rows as u32 {
+            let screen_row = (abs_row - view_base) as u16 + row_offset;
+            for cmd in commands.iter_mut() {
+                if cmd.row == screen_row && cmd.col >= start_col && cmd.col < end_col {
+                    cmd.flags |= growterm_types::CellFlags::UNDERLINE;
+                }
+            }
+        }
+    }
+
     drop(state);
 
     let tab_bar = if show_tab_bar {

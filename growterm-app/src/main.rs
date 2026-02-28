@@ -3,6 +3,7 @@ mod ink_workaround;
 #[allow(dead_code)]
 mod selection;
 mod tab;
+mod url;
 mod zoom;
 
 const FONT_SIZE: f32 = 32.0;

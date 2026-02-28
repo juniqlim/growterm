@@ -33,6 +33,7 @@ pub struct Ivars {
     marked_text: RefCell<String>,
     current_event: RefCell<Option<Retained<NSEvent>>>,
     pending_resize: Cell<Option<(u32, u32)>>,
+    last_mouse_pos: Cell<(f64, f64)>,
 }
 
 define_class! {
@@ -105,15 +106,27 @@ define_class! {
             self.ivars().current_event.replace(None);
         }
 
+        #[unsafe(method(mouseMoved:))]
+        fn mouse_moved(&self, event: &NSEvent) {
+            let (x, y) = self.event_location_in_backing(event);
+            self.ivars().last_mouse_pos.set((x, y));
+            let modifiers = convert_modifier_flags(event.modifierFlags());
+            self.send_event(AppEvent::MouseMoved(x, y, modifiers));
+        }
+
         #[unsafe(method(flagsChanged:))]
-        fn flags_changed(&self, _event: &NSEvent) {
-            // modifier 변경은 별도로 처리하지 않음
+        fn flags_changed(&self, event: &NSEvent) {
+            // Cmd 키 변경 시 마지막 마우스 위치로 MouseMoved 재전송
+            let (x, y) = self.ivars().last_mouse_pos.get();
+            let modifiers = convert_modifier_flags(event.modifierFlags());
+            self.send_event(AppEvent::MouseMoved(x, y, modifiers));
         }
 
         #[unsafe(method(mouseDown:))]
         fn mouse_down(&self, event: &NSEvent) {
             let (x, y) = self.event_location_in_backing(event);
-            self.send_event(AppEvent::MouseDown(x, y));
+            let modifiers = convert_modifier_flags(event.modifierFlags());
+            self.send_event(AppEvent::MouseDown(x, y, modifiers));
         }
 
         #[unsafe(method(mouseDragged:))]
@@ -333,11 +346,30 @@ impl TerminalView {
             marked_text: RefCell::new(String::new()),
             current_event: RefCell::new(None),
             pending_resize: Cell::new(None),
+            last_mouse_pos: Cell::new((0.0, 0.0)),
         });
         let this: Retained<Self> = unsafe { msg_send![super(this), init] };
         this.setWantsLayer(true);
         if let Some(layer) = this.layer() {
             layer.setContentsScale(this.backing_scale_factor());
+        }
+        // Register NSTrackingArea for mouseMoved events
+        {
+            use objc2::AnyThread;
+            use objc2_app_kit::{NSTrackingArea, NSTrackingAreaOptions};
+            let options = NSTrackingAreaOptions::MouseMoved
+                | NSTrackingAreaOptions::ActiveInKeyWindow
+                | NSTrackingAreaOptions::InVisibleRect;
+            let tracking_area = unsafe {
+                NSTrackingArea::initWithRect_options_owner_userInfo(
+                    NSTrackingArea::alloc(),
+                    NSRect::ZERO,
+                    options,
+                    Some(&this),
+                    None,
+                )
+            };
+            this.addTrackingArea(&tracking_area);
         }
         // Register for file drag & drop
         let file_url_type = unsafe { objc2_app_kit::NSPasteboardTypeFileURL };

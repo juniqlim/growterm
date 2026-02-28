@@ -430,6 +430,14 @@ impl GpuDrawer {
                 position: [x, y + cell_h],
                 color,
             });
+
+            // Underline: thin rect at cell bottom using fg color
+            if cmd.flags.contains(CellFlags::UNDERLINE) {
+                let underline_h = (cell_h * 0.07).max(1.0);
+                let underline_y = y + cell_h - underline_h;
+                let fg_color = rgb_to_f32(cmd.fg);
+                push_bg_rect(&mut bg_vertices, x, underline_y, w, underline_h, fg_color);
+            }
         }
 
         // Build glyph vertices
