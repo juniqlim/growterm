@@ -5,6 +5,9 @@
 use growterm_types::Cell;
 use unicode_width::UnicodeWidthChar;
 
+const CLAUDE_PROCESS_NAME: &str = "claude";
+const CLAUDE_PROMPT_BASE_COL: u16 = 2;
+
 pub struct InkImeState {
     ink_app_cached: Option<bool>,
     committed_width: u16,
@@ -22,14 +25,18 @@ impl InkImeState {
     pub fn on_text_commit(&mut self, text: &str) {
         if self.ink_app_cached == Some(true) {
             let w: u16 = text.chars().map(|c| c.width().unwrap_or(1) as u16).sum();
-            self.committed_width += w;
+            self.committed_width = self.committed_width.saturating_add(w);
         }
     }
 
     /// Detect whether the active PTY is running a Claude Code process.
     pub fn on_preedit(&mut self, child_pid: Option<u32>) {
+        self.on_preedit_with(child_pid, has_descendant_named);
+    }
+
+    fn on_preedit_with(&mut self, child_pid: Option<u32>, checker: impl FnOnce(u32, &str) -> bool) {
         if let Some(pid) = child_pid {
-            let found = has_descendant_named(pid, "claude");
+            let found = checker(pid, CLAUDE_PROCESS_NAME);
             self.ink_app_cached = Some(found);
             if !found {
                 self.committed_width = 0;
@@ -53,7 +60,7 @@ impl InkImeState {
             return None;
         }
         find_prompt_row(cells).map(|prompt_row| {
-            let col = 2 + self.committed_width;
+            let col = CLAUDE_PROMPT_BASE_COL + self.committed_width;
             let row = prompt_row as u16 + col / cols;
             let col = col % cols;
             (row, col)
@@ -203,6 +210,31 @@ mod tests {
         assert_eq!(state.committed_width, 2);
         state.on_text_commit("ab"); // width 2
         assert_eq!(state.committed_width, 4);
+    }
+
+    #[test]
+    fn on_preedit_detects_claude() {
+        let mut state = InkImeState::new();
+        state.on_preedit_with(Some(1), |_, _| true);
+        assert!(state.is_active());
+    }
+
+    #[test]
+    fn on_preedit_resets_width_when_not_claude() {
+        let mut state = InkImeState {
+            ink_app_cached: Some(true),
+            committed_width: 5,
+        };
+        state.on_preedit_with(Some(1), |_, _| false);
+        assert!(!state.is_active());
+        assert_eq!(state.committed_width, 0);
+    }
+
+    #[test]
+    fn on_preedit_noop_without_pid() {
+        let mut state = InkImeState::new();
+        state.on_preedit_with(None, |_, _| panic!("should not be called"));
+        assert_eq!(state.ink_app_cached, None);
     }
 
     #[test]
