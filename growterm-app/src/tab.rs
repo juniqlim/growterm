@@ -1007,4 +1007,34 @@ mod tests {
         mgr.add_tab(dummy_tab());
         assert_eq!(mgr.tab_index_at_x(800.0, 800.0), None);
     }
+
+    #[test]
+    fn mouse_y_offset_zero_when_single_tab() {
+        let mut mgr = TabManager::new();
+        mgr.add_tab(dummy_tab());
+        assert!(!mgr.show_tab_bar());
+        assert_eq!(mgr.mouse_y_offset(20.0), 0.0);
+    }
+
+    #[test]
+    fn mouse_y_offset_equals_cell_height_when_multiple_tabs() {
+        let mut mgr = TabManager::new();
+        mgr.add_tab(dummy_tab());
+        mgr.add_tab(dummy_tab());
+        assert!(mgr.show_tab_bar());
+        assert_eq!(mgr.mouse_y_offset(20.0), 20.0);
+    }
+
+    #[test]
+    fn click_in_tab_bar_region_is_tab_bar() {
+        let mut mgr = TabManager::new();
+        mgr.add_tab(dummy_tab());
+        mgr.add_tab(dummy_tab());
+        let cell_h: f32 = 20.0;
+        // y < cell_h means tab bar area
+        assert!(mgr.show_tab_bar() && (10.0_f32) < cell_h);
+        // y >= cell_h means terminal area
+        assert!(!(mgr.show_tab_bar() && (20.0_f32) < cell_h));
+        assert!(!(mgr.show_tab_bar() && (25.0_f32) < cell_h));
+    }
 }

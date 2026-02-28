@@ -115,6 +115,19 @@ impl MacWindow {
         }
     }
 
+    pub fn discard_marked_text(&self) {
+        let raw = Retained::as_ptr(&self.view) as usize;
+        dispatch_async_main(move || {
+            let view = raw as *const objc2::runtime::AnyObject;
+            unsafe {
+                let ctx: *const objc2::runtime::AnyObject = objc2::msg_send![view, inputContext];
+                if !ctx.is_null() {
+                    let _: () = objc2::msg_send![ctx, discardMarkedText];
+                }
+            }
+        });
+    }
+
     pub fn set_pomodoro_checked(&self, checked: bool) {
         dispatch_async_main(move || {
             let mtm = MainThreadMarker::new().unwrap();

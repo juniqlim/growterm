@@ -113,6 +113,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                                 tabs.add_tab(tab);
                                 sel.clear();
                                 preedit.clear();
+                                window.discard_marked_text();
                                 // Tab bar just appeared — shrink existing tabs by 1 row
                                 if had_no_tab_bar && tabs.show_tab_bar() {
                                     for t in tabs.tabs_mut() {
@@ -160,6 +161,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                             tabs.prev_tab();
                             sel.clear();
                             preedit.clear();
+                            window.discard_marked_text();
                             render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range, pomodoro.is_input_blocked());
                             continue;
                         }
@@ -167,6 +169,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                             tabs.next_tab();
                             sel.clear();
                             preedit.clear();
+                            window.discard_marked_text();
                             render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range, pomodoro.is_input_blocked());
                             continue;
                         }
@@ -190,6 +193,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                             tabs.switch_to(idx);
                             sel.clear();
                             preedit.clear();
+                            window.discard_marked_text();
                             render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range, pomodoro.is_input_blocked());
                         }
                         continue;
@@ -295,6 +299,8 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     let screen_w = window.inner_size().0 as f32;
                     if let Some(index) = tabs.tab_index_at_x(x as f32, screen_w) {
                         tabs.switch_to(index);
+                        preedit.clear();
+                        window.discard_marked_text();
                         window.request_redraw();
                     }
                     continue;
@@ -358,6 +364,9 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
             }
             AppEvent::MouseUp(x, y) => {
                 let (cw, ch) = drawer.cell_size();
+                if tabs.show_tab_bar() && (y as f32) < ch {
+                    continue;
+                }
                 let (screen_row, col) =
                     selection::pixel_to_cell(x as f32, y as f32 - tabs.mouse_y_offset(ch), cw, ch);
                 let abs_row = if let Some(tab) = tabs.active_tab() {
