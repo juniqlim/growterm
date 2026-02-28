@@ -1,4 +1,5 @@
 mod app;
+mod ink_workaround;
 #[allow(dead_code)]
 mod selection;
 mod tab;

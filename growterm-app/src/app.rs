@@ -5,8 +5,7 @@ use std::sync::{mpsc, Arc};
 use growterm_gpu_draw::{GpuDrawer, TabBarInfo};
 use growterm_macos::{AppEvent, MacWindow, Modifiers};
 
-use unicode_width::UnicodeWidthChar;
-
+use crate::ink_workaround::InkImeState;
 use crate::selection::{self, Selection};
 use crate::tab::{Tab, TabManager};
 use crate::zoom;
@@ -41,8 +40,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
     let test_dropped_path = std::env::var("GROWTERM_TEST_DROPPED_PATH").ok();
     let mut test_input_sent = false;
     let mut test_drop_sent = false;
-    let mut ink_app_cached: Option<bool> = None;
-    let mut ink_committed_width: u16 = 0;
+    let mut ink_state = InkImeState::new();
 
     loop {
         let event = if let Some(evt) = deferred.take() {
@@ -56,10 +54,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
         match event {
             AppEvent::TextCommit(text) => {
                 preedit.clear();
-                if ink_app_cached == Some(true) {
-                    let w: u16 = text.chars().map(|c| c.width().unwrap_or(1) as u16).sum();
-                    ink_committed_width += w;
-                }
+                ink_state.on_text_commit(&text);
                 if let Some(tab) = tabs.active_tab_mut() {
                     let _ = tab.pty_writer.write_all(text.as_bytes());
                     let _ = tab.pty_writer.flush();
@@ -67,47 +62,9 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
             }
             AppEvent::Preedit(text) => {
                 if !text.is_empty() {
-                    if let Some(tab) = tabs.active_tab() {
-                        if let Some(pid) = tab.pty_writer.child_pid() {
-                            let found = has_descendant_named(pid, "claude");
-                            ink_app_cached = Some(found);
-                            if !found {
-                                ink_committed_width = 0;
-                            }
-                        }
-                    }
-                }
-                if !text.is_empty() {
-                    if let Some(tab) = tabs.active_tab() {
-                        let state = tab.terminal.lock().unwrap();
-                        let (crow, ccol) = state.grid.cursor_pos();
-                        let cells = state.grid.cells();
-                        eprintln!("=== PREEDIT cursor=({},{}) ===", crow, ccol);
-                        // 커서 행 주변 5행의 셀 정보 출력
-                        let start = (crow as usize).saturating_sub(5);
-                        let end = (crow as usize + 3).min(cells.len());
-                        for r in start..end {
-                            let row = &cells[r];
-                            for (c, cell) in row.iter().enumerate().take(60) {
-                                if cell.character != '\0' && cell.character != ' ' {
-                                    eprintln!(
-                                        "  [{},{}] ch='{}' fg={:?} bg={:?}",
-                                        r, c, cell.character,
-                                        cell.fg, cell.bg,
-                                    );
-                                }
-                            }
-                        }
-                        // 커서 위치 셀
-                        if (crow as usize) < cells.len() {
-                            let cursor_cell = &cells[crow as usize][ccol as usize];
-                            eprintln!(
-                                "  CURSOR CELL ch='{}' fg={:?} bg={:?}",
-                                cursor_cell.character,
-                                cursor_cell.fg, cursor_cell.bg,
-                            );
-                        }
-                    }
+                    let child_pid = tabs.active_tab()
+                        .and_then(|t| t.pty_writer.child_pid());
+                    ink_state.on_preedit(child_pid);
                 }
                 preedit = text;
                 window.request_redraw();
@@ -144,7 +101,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                             }
                             Err(e) => eprintln!("Failed to spawn tab: {e}"),
                         }
-                        render_with_tabs(&mut drawer, &tabs, &preedit, &sel, ink_app_cached.unwrap_or(false), ink_committed_width);
+                        render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state);
                         continue;
                     }
 
@@ -169,7 +126,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                                 let _ = t.pty_writer.resize(rows, cols);
                             }
                         }
-                        render_with_tabs(&mut drawer, &tabs, &preedit, &sel, ink_app_cached.unwrap_or(false), ink_committed_width);
+                        render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state);
                         continue;
                     }
 
@@ -179,14 +136,14 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                             tabs.prev_tab();
                             sel.clear();
                             preedit.clear();
-                            render_with_tabs(&mut drawer, &tabs, &preedit, &sel, ink_app_cached.unwrap_or(false), ink_committed_width);
+                            render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state);
                             continue;
                         }
                         if keycode == kc::ANSI_RIGHT_BRACKET {
                             tabs.next_tab();
                             sel.clear();
                             preedit.clear();
-                            render_with_tabs(&mut drawer, &tabs, &preedit, &sel, ink_app_cached.unwrap_or(false), ink_committed_width);
+                            render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state);
                             continue;
                         }
                     }
@@ -209,7 +166,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                             tabs.switch_to(idx);
                             sel.clear();
                             preedit.clear();
-                            render_with_tabs(&mut drawer, &tabs, &preedit, &sel, ink_app_cached.unwrap_or(false), ink_committed_width);
+                            render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state);
                         }
                         continue;
                     }
@@ -225,7 +182,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                                 state.grid.scroll_down_view(row_count);
                             }
                         }
-                        render_with_tabs(&mut drawer, &tabs, &preedit, &sel, ink_app_cached.unwrap_or(false), ink_committed_width);
+                        render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state);
                         continue;
                     }
 
@@ -281,7 +238,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                             drop(state);
                             let _ = tab.pty_writer.resize(term_rows, cols);
                         }
-                        render_with_tabs(&mut drawer, &tabs, &preedit, &sel, ink_app_cached.unwrap_or(false), ink_committed_width);
+                        render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state);
                         continue;
                     }
                     continue;
@@ -291,12 +248,8 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     growterm_macos::convert_key(keycode, characters.as_deref(), modifiers)
                 {
                     let bytes = growterm_input::encode(key_event);
-                    // Enter 시 ink commit 폭 리셋
                     if bytes == b"\r" || bytes == b"\n" {
-                        eprintln!("[ENTER] resetting ink_committed_width from {}", ink_committed_width);
-                        ink_committed_width = 0;
-                    } else {
-                        eprintln!("[KEY] bytes={:?} ink_committed_width={}", bytes, ink_committed_width);
+                        ink_state.on_enter();
                     }
                     if let Some(tab) = tabs.active_tab_mut() {
                         let _ = tab.pty_writer.write_all(&bytes);
@@ -377,7 +330,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                             state.grid.scroll_down_view((-lines) as usize);
                         }
                     }
-                    render_with_tabs(&mut drawer, &tabs, &preedit, &sel, ink_app_cached.unwrap_or(false), ink_committed_width);
+                    render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state);
                 }
             }
             AppEvent::Resize(mut w, mut h) => {
@@ -404,7 +357,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     drop(state);
                     let _ = tab.pty_writer.resize(term_rows, cols);
                 }
-                render_with_tabs(&mut drawer, &tabs, &preedit, &sel, ink_app_cached.unwrap_or(false), ink_committed_width);
+                render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state);
             }
             AppEvent::RedrawRequested => {
                 let was_dirty = tabs
@@ -414,7 +367,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                 if preedit_changed {
                     prev_preedit = preedit.clone();
                 }
-                render_with_tabs(&mut drawer, &tabs, &preedit, &sel, ink_app_cached.unwrap_or(false), ink_committed_width);
+                render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state);
                 if was_dirty || preedit_changed {
                     if let Some(ref path) = grid_dump_path {
                         let dump_file = std::path::Path::new(path);
@@ -499,68 +452,6 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
     }
 }
 
-/// grid에서 두 separator(─) 사이에 있는 ❯ 프롬프트 행을 찾음.
-fn find_prompt_row(cells: &[Vec<growterm_types::Cell>]) -> Option<usize> {
-    let is_separator = |row: &[growterm_types::Cell]| -> bool {
-        row.first().map_or(false, |c| c.character == '─')
-    };
-    let separators: Vec<usize> = cells
-        .iter()
-        .enumerate()
-        .filter(|(_, row)| is_separator(row))
-        .map(|(i, _)| i)
-        .collect();
-    for window in separators.windows(2).rev() {
-        let (top, bottom) = (window[0], window[1]);
-        for row_idx in (top + 1)..bottom {
-            if cells[row_idx].iter().any(|c| c.character == '❯') {
-                return Some(row_idx);
-            }
-        }
-    }
-    None
-}
-
-fn has_descendant_named(root_pid: u32, name: &str) -> bool {
-    let output = match std::process::Command::new("ps")
-        .args(["-eo", "pid,ppid,comm="])
-        .output()
-    {
-        Ok(o) => o,
-        Err(_) => return false,
-    };
-    let text = String::from_utf8_lossy(&output.stdout);
-    let mut children: std::collections::HashMap<u32, Vec<(u32, String)>> =
-        std::collections::HashMap::new();
-    for line in text.lines() {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() < 3 {
-            continue;
-        }
-        let pid: u32 = match parts[0].parse() {
-            Ok(p) => p,
-            Err(_) => continue,
-        };
-        let ppid: u32 = match parts[1].parse() {
-            Ok(p) => p,
-            Err(_) => continue,
-        };
-        let comm = parts[2..].join(" ");
-        children.entry(ppid).or_default().push((pid, comm));
-    }
-    let mut stack = vec![root_pid];
-    while let Some(pid) = stack.pop() {
-        if let Some(kids) = children.get(&pid) {
-            for (kid_pid, comm) in kids {
-                if comm.contains(name) {
-                    return true;
-                }
-                stack.push(*kid_pid);
-            }
-        }
-    }
-    false
-}
 
 fn shell_escape(path: &str) -> String {
     if path.contains(|c: char| c.is_whitespace() || "\"'\\$`!#&|;(){}[]<>?*~".contains(c)) {
@@ -570,7 +461,7 @@ fn shell_escape(path: &str) -> String {
     }
 }
 
-fn render_with_tabs(drawer: &mut GpuDrawer, tabs: &TabManager, preedit: &str, sel: &Selection, is_ink_app: bool, ink_committed_width: u16) {
+fn render_with_tabs(drawer: &mut GpuDrawer, tabs: &TabManager, preedit: &str, sel: &Selection, ink_state: &InkImeState) {
     let tab = match tabs.active_tab() {
         Some(t) => t,
         None => return,
@@ -611,15 +502,9 @@ fn render_with_tabs(drawer: &mut GpuDrawer, tabs: &TabManager, preedit: &str, se
     let show_tab_bar = tabs.show_tab_bar();
     let (cell_w, cell_h) = drawer.cell_size();
     let row_offset = if show_tab_bar { 1 } else { 0 };
-    let preedit_pos_override = if is_ink_app && preedit_str.is_some() {
-        find_prompt_row(&visible).map(|prompt_row| {
-            let col = 2 + ink_committed_width;
-            let cols_per_row = visible.first().map_or(80, |r| r.len()) as u16;
-            let row = prompt_row as u16 + col / cols_per_row;
-            let col = col % cols_per_row;
-            eprintln!("  PREEDIT OVERRIDE pos=({},{}) committed_w={}", row, col, ink_committed_width);
-            (row, col)
-        })
+    let cols_per_row = visible.first().map_or(80, |r| r.len()) as u16;
+    let preedit_pos_override = if preedit_str.is_some() {
+        ink_state.preedit_pos(&visible, cols_per_row)
     } else {
         None
     };
