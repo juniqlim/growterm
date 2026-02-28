@@ -33,9 +33,12 @@ fn launches_claude_code_in_shell() {
     ));
     let _ = std::fs::remove_file(&dump_path);
 
-    let mut child = spawn_with_dump_and_input(&bin, &dump_path, "claude\n");
+    let mut child = spawn_with_dump_and_input(&bin, &dump_path, "env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT claude\n");
 
-    let dump_content = wait_for_dump(&dump_path, Duration::from_secs(15), Some(&mut child));
+    // Wait longer: claude needs time to start up after env unset
+    std::thread::sleep(Duration::from_secs(5));
+    let _ = std::fs::remove_file(&dump_path);
+    let dump_content = wait_for_dump(&dump_path, Duration::from_secs(30), Some(&mut child));
 
     if dump_content.is_none() {
         let status = child.try_wait().ok().flatten();

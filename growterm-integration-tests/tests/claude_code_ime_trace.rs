@@ -89,13 +89,16 @@ fn claude_code_hangul_composition_cursor_matches_visible_char_position() {
     ));
     let _ = std::fs::remove_file(&dump_path);
 
-    let mut child = spawn_with_dump_and_input(&bin, &dump_path, "claude\n");
+    let mut child = spawn_with_dump_and_input(&bin, &dump_path, "env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT claude\n");
 
     let initial = wait_for_dump(&dump_path, Duration::from_secs(15), Some(&mut child));
     assert!(
         initial.is_some(),
         "failed to receive initial dump before IME input"
     );
+
+    // // Wait for claude to fully start before sending keystrokes
+    // std::thread::sleep(Duration::from_millis(500));
 
     if debug_mode() {
         activate_by_pid(child.id());
