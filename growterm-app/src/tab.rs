@@ -196,7 +196,7 @@ fn start_io_thread(
     window: Arc<MacWindow>,
 ) {
     std::thread::spawn(move || {
-        let mut buf = [0u8; 4096];
+        let mut buf = [0u8; 65536];
         let mut pending_queries: Vec<u8> = Vec::new();
         let mut kitty_keyboard_flags: u16 = 0;
         let mut kitty_keyboard_stack: Vec<u16> = Vec::new();
@@ -266,8 +266,13 @@ fn start_io_thread(
                     }
 
                     if !sync_output {
-                        dirty.store(true, Ordering::Relaxed);
-                        window.request_redraw();
+                        // Only request redraw if dirty was previously false.
+                        // This coalesces multiple PTY reads into a single
+                        // redraw, avoiding redundant dispatch_async_f overhead.
+                        let was_clean = !dirty.swap(true, Ordering::Relaxed);
+                        if was_clean {
+                            window.request_redraw();
+                        }
                     }
                 }
                 Err(e) => {
