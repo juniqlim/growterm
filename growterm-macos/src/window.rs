@@ -68,6 +68,7 @@ impl MacWindow {
 
         let view = TerminalView::new(mtm);
 
+        ns_window.setTabbingMode(objc2_app_kit::NSWindowTabbingMode::Disallowed);
         ns_window.setContentView(Some(&view));
         ns_window.makeFirstResponder(Some(&view));
 
@@ -112,6 +113,24 @@ impl MacWindow {
                 (*window).setTitle(&ns_title);
             });
         }
+    }
+
+    pub fn set_pomodoro_checked(&self, checked: bool) {
+        dispatch_async_main(move || {
+            let mtm = MainThreadMarker::new().unwrap();
+            let app = objc2_app_kit::NSApplication::sharedApplication(mtm);
+            if let Some(menu) = app.mainMenu() {
+                // View menu is item at index 1
+                if let Some(view_menu_item) = menu.itemAtIndex(1) {
+                    if let Some(view_menu) = view_menu_item.submenu() {
+                        if let Some(pomodoro_item) = view_menu.itemAtIndex(0) {
+                            let state = if checked { 1 } else { 0 };
+                            pomodoro_item.setState(state);
+                        }
+                    }
+                }
+            }
+        });
     }
 
     pub fn show(&self) {

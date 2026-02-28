@@ -57,6 +57,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
     let mut pomodoro = Pomodoro::new();
     if load_pomodoro_enabled() {
         pomodoro.toggle();
+        window.set_pomodoro_checked(true);
     }
     // hover_url_range: (abs_row, start_col, end_col) for Cmd+hover URL underline
     let mut hover_url_range: Option<(u32, u16, u16)> = None;
@@ -547,7 +548,9 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
             }
             AppEvent::TogglePomodoro => {
                 pomodoro.toggle();
-                save_pomodoro_enabled(pomodoro.is_enabled());
+                let enabled = pomodoro.is_enabled();
+                save_pomodoro_enabled(enabled);
+                window.set_pomodoro_checked(enabled);
                 let title = match pomodoro.display_text() {
                     Some(t) => t,
                     None => "growterm".to_string(),
