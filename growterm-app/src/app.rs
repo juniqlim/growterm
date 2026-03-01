@@ -71,7 +71,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
     let mut hover_url_range: Option<(u32, u16, u16)> = None;
     let mut scrollbar_dragging = false;
     let mut scrollbar_visible_until: Option<Instant> = None;
-    const SCROLLBAR_WIDTH: f32 = 6.0;
+    const SCROLLBAR_HIT_WIDTH: f32 = 20.0;
     const SCROLLBAR_SHOW_DURATION: Duration = Duration::from_millis(1500);
 
     loop {
@@ -346,7 +346,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                 // Scrollbar area click: start dragging
                 let screen_w = window.inner_size().0 as f32;
                 let screen_h = window.inner_size().1 as f32;
-                if (x as f32) >= screen_w - SCROLLBAR_WIDTH {
+                if (x as f32) >= screen_w - SCROLLBAR_HIT_WIDTH {
                     if let Some(tab) = tabs.active_tab() {
                         let mut state = tab.terminal.lock().unwrap();
                         let scrollback_len = state.grid.scrollback_len();
