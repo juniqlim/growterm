@@ -10,11 +10,14 @@ use growterm_render_cmd::TerminalPalette;
 use growterm_types::Rgb;
 use growterm_vt_parser::VtParser;
 
+use crate::response_timer::ResponseTimer;
+
 pub struct Tab {
     pub terminal: Arc<Mutex<TerminalState>>,
     pub pty_writer: PtyWriter,
     pub dirty: Arc<AtomicBool>,
     pub last_pty_output_at: Arc<Mutex<Option<Instant>>>,
+    pub response_timer: ResponseTimer,
 }
 
 pub struct TerminalState {
@@ -163,12 +166,21 @@ impl TabManager {
 
     pub fn tab_bar_info(&self) -> TabBarInfo {
         TabBarInfo {
-            titles: (1..=self.tabs.len())
-                .map(|i| {
-                    if i <= 9 {
-                        format!("⌘{}", i)
+            titles: self
+                .tabs
+                .iter()
+                .enumerate()
+                .map(|(idx, tab)| {
+                    let num = idx + 1;
+                    let label = if num <= 9 {
+                        format!("⌘{}", num)
                     } else {
-                        format!("{}", i)
+                        format!("{}", num)
+                    };
+                    if let Some(timer_text) = tab.response_timer.display_text() {
+                        format!("{} {}", label, timer_text)
+                    } else {
+                        label
                     }
                 })
                 .collect(),
@@ -218,6 +230,7 @@ impl Tab {
             pty_writer,
             dirty,
             last_pty_output_at,
+            response_timer: ResponseTimer::new(),
         })
     }
 }
@@ -741,6 +754,7 @@ mod tests {
             pty_writer,
             dirty,
             last_pty_output_at: Arc::new(Mutex::new(None)),
+            response_timer: ResponseTimer::new(),
         }
     }
 

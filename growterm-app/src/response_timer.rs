@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
 
 const COMPLETION_TIMEOUT: Duration = Duration::from_millis(500);
+const MIN_DURATION_FOR_AVG: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum State {
@@ -103,12 +104,26 @@ impl ResponseTimer {
                     if let Some(enter) = self.enter_at {
                         let total = last.duration_since(enter);
                         self.last_total = Some(total);
-                        self.total_sum += total;
-                        self.count += 1;
+                        if total >= MIN_DURATION_FOR_AVG {
+                            self.total_sum += total;
+                            self.count += 1;
+                        }
                     }
                     self.state = State::Idle;
                 }
             }
+        }
+    }
+
+    pub fn stats(&self) -> (Duration, u32) {
+        (self.total_sum, self.count)
+    }
+
+    pub fn set_enabled(&mut self, enabled: bool) {
+        if enabled && !self.enabled {
+            self.enabled = true;
+        } else if !enabled && self.enabled {
+            self.toggle();
         }
     }
 
@@ -121,7 +136,7 @@ impl ResponseTimer {
             return None;
         }
         let avg_part = if self.count > 0 {
-            format!(" avg {}s", (self.total_sum / self.count).as_secs())
+            format!(" avg {}s/{}", (self.total_sum / self.count).as_secs(), self.count)
         } else {
             String::new()
         };
@@ -216,7 +231,7 @@ mod tests {
         let text = rt
             .display_text_at(now + Duration::from_secs(12))
             .unwrap();
-        assert_eq!(text, "⏱ 2s avg 3s");
+        assert_eq!(text, "⏱ 2s avg 3s/1");
     }
 
     #[test]
@@ -268,7 +283,7 @@ mod tests {
         let text = rt
             .display_text_at(now + Duration::from_secs(10))
             .unwrap();
-        assert_eq!(text, "⏱ 5s avg 5s");
+        assert_eq!(text, "⏱ 5s avg 5s/1");
     }
 
     #[test]
@@ -293,7 +308,41 @@ mod tests {
         let text = rt
             .display_text_at(t2 + Duration::from_secs(10))
             .unwrap();
-        assert_eq!(text, "⏱ 4s avg 3s");
+        assert_eq!(text, "⏱ 4s avg 3s/2");
+    }
+
+    #[test]
+    fn stats_returns_total_sum_and_count() {
+        let mut rt = enabled_timer();
+        let now = Instant::now();
+
+        // First command: 2s
+        rt.on_enter_at(now);
+        rt.on_pty_output(now + Duration::from_secs(2));
+        rt.tick_at(now + Duration::from_millis(2500));
+
+        // Second command: 4s
+        let t2 = now + Duration::from_secs(10);
+        rt.on_enter_at(t2);
+        rt.on_pty_output(t2 + Duration::from_secs(4));
+        rt.tick_at(t2 + Duration::from_millis(4500));
+
+        let (total_sum, count) = rt.stats();
+        assert_eq!(total_sum, Duration::from_secs(6));
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn set_enabled_enables_and_disables() {
+        let mut rt = ResponseTimer::new();
+        rt.set_enabled(true);
+        assert!(rt.is_enabled());
+        rt.set_enabled(false);
+        assert!(!rt.is_enabled());
+        // Double enable is no-op
+        rt.set_enabled(true);
+        rt.set_enabled(true);
+        assert!(rt.is_enabled());
     }
 
     #[test]
@@ -301,6 +350,33 @@ mod tests {
         let mut rt = enabled_timer();
         rt.on_pty_output(Instant::now());
         assert_eq!(rt.state, State::Idle);
+    }
+
+    #[test]
+    fn sub_second_response_excluded_from_avg() {
+        let mut rt = enabled_timer();
+        let now = Instant::now();
+
+        // Fast command: 50ms (below 1s threshold)
+        rt.on_enter_at(now);
+        rt.on_pty_output(now + Duration::from_millis(50));
+        rt.tick_at(now + Duration::from_millis(550));
+        assert_eq!(rt.state, State::Idle);
+        assert_eq!(rt.last_total, Some(Duration::from_millis(50)));
+        assert_eq!(rt.count, 0); // not counted in avg
+
+        // Slow command: 5s
+        let t2 = now + Duration::from_secs(5);
+        rt.on_enter_at(t2);
+        rt.on_pty_output(t2 + Duration::from_secs(5));
+        rt.tick_at(t2 + Duration::from_millis(5500));
+        assert_eq!(rt.count, 1);
+
+        // avg should be 5s (fast command excluded)
+        let text = rt
+            .display_text_at(t2 + Duration::from_secs(10))
+            .unwrap();
+        assert_eq!(text, "⏱ 5s avg 5s/1");
     }
 
     #[test]
