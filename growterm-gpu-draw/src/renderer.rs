@@ -63,6 +63,7 @@ struct GlyphRegion {
 
 const GLYPH_TEXTURE_SIZE: u32 = 1024;
 const TAB_FONT_SIZE: f32 = 24.0;
+const TAB_BAR_PADDING: f32 = 8.0;
 
 /// Tab bar rendering info passed from the app layer.
 pub struct TabBarInfo {
@@ -418,6 +419,12 @@ impl GpuDrawer {
         self.tab_atlas.cell_size()
     }
 
+    /// Fixed tab bar height in pixels (independent of body font size).
+    pub fn tab_bar_height(&self) -> f32 {
+        let (_, tab_ch) = self.tab_atlas.cell_size();
+        tab_ch + TAB_BAR_PADDING
+    }
+
     pub fn draw(
         &mut self,
         commands: &[RenderCommand],
@@ -448,13 +455,18 @@ impl GpuDrawer {
         });
 
         let (cell_w, cell_h) = self.atlas.cell_size();
+        let y_off = if tab_bar.is_some() {
+            self.tab_bar_height()
+        } else {
+            0.0
+        };
 
         // Build bg vertices
         let mut bg_vertices: Vec<BgVertex> = Vec::new();
 
         for cmd in commands {
             let x = cmd.col as f32 * cell_w;
-            let y = cmd.row as f32 * cell_h;
+            let y = y_off + cmd.row as f32 * cell_h;
             let w = if cmd.flags.contains(CellFlags::WIDE_CHAR) {
                 cell_w * 2.0
             } else {
@@ -517,7 +529,7 @@ impl GpuDrawer {
             let ch = cmd.character;
             if ch >= '\u{2580}' && ch <= '\u{259F}' && !(ch >= '\u{2591}' && ch <= '\u{2593}') {
                 let cx = cmd.col as f32 * cell_w;
-                let cy = cmd.row as f32 * cell_h;
+                let cy = y_off + cmd.row as f32 * cell_h;
                 let fg = rgb_to_f32(cmd.fg);
                 if push_block_element_rects(&mut bg_vertices, ch, cx, cy, cell_w, cell_h, fg) {
                     continue;
@@ -528,7 +540,7 @@ impl GpuDrawer {
             if ch >= '\u{2500}' && ch <= '\u{257F}' {
                 if let Some(segs) = box_drawing_segments(ch) {
                     let cx = cmd.col as f32 * cell_w;
-                    let cy = cmd.row as f32 * cell_h;
+                    let cy = y_off + cmd.row as f32 * cell_h;
                     let fg = rgb_to_f32(cmd.fg);
                     let light_h = 1.0_f32;
                     let heavy_h = (cell_h / 8.0).ceil().max(2.0);
@@ -645,7 +657,7 @@ impl GpuDrawer {
             }
 
             let cell_x = cmd.col as f32 * cell_w;
-            let cell_y = cmd.row as f32 * cell_h;
+            let cell_y = y_off + cmd.row as f32 * cell_h;
 
             // Position glyph within cell
             let baseline_y = cell_y + cell_h * 0.8; // approximate baseline
@@ -692,10 +704,11 @@ impl GpuDrawer {
         if let Some((thumb_top_ratio, thumb_height_ratio)) = scrollbar {
             let screen_w = self.surface_config.width as f32;
             let screen_h = self.surface_config.height as f32;
+            let term_h = screen_h - y_off;
             let bar_w = 6.0_f32;
             let x0 = screen_w - bar_w;
-            let y0 = thumb_top_ratio * screen_h;
-            let h = thumb_height_ratio * screen_h;
+            let y0 = y_off + thumb_top_ratio * term_h;
+            let h = thumb_height_ratio * term_h;
             let color = [0.5, 0.5, 0.5];
             push_rect(&mut bg_vertices, x0, y0, bar_w, h, color);
         }
@@ -704,7 +717,7 @@ impl GpuDrawer {
         if let Some(tab_info) = tab_bar {
             let (tab_cw, tab_ch) = self.tab_atlas.cell_size();
             let tab_ascent = self.tab_atlas.ascent();
-            let bar_h = cell_h;
+            let bar_h = self.tab_bar_height();
             let screen_w = self.surface_config.width as f32;
             let bar_bg: [f32; 3] = [0.15, 0.15, 0.15];
             let active_bg: [f32; 3] = [0.3, 0.3, 0.3];

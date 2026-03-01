@@ -117,9 +117,10 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     if keycode == kc::ANSI_T {
                         let (cw, ch) = drawer.cell_size();
                         let (w, h) = window.inner_size();
-                        let (cols, rows) = zoom::calc_grid_size(w, h, cw, ch);
+                        let (cols, _rows) = zoom::calc_grid_size(w, h, cw, ch);
                         let had_no_tab_bar = !tabs.show_tab_bar();
-                        let term_rows = rows.saturating_sub(1).max(1);
+                        // After adding a tab, tab bar will show — compute rows with tab bar
+                        let term_rows = ((h as f32 - drawer.tab_bar_height()) / ch).floor().max(1.0) as u16;
                         let active_cwd = tabs
                             .active_tab()
                             .and_then(|t| t.pty_writer.child_pid())
@@ -291,8 +292,8 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                         drawer.set_font_size(font_size);
                         let (cw, ch) = drawer.cell_size();
                         let (w, h) = window.inner_size();
-                        let (cols, rows) = zoom::calc_grid_size(w, h, cw, ch);
-                        let term_rows = tabs.term_rows(rows);
+                        let (cols, _rows) = zoom::calc_grid_size(w, h, cw, ch);
+                        let term_rows = tabs.term_rows(h, ch, drawer.tab_bar_height());
                         // Resize all tabs
                         for tab in tabs.tabs_mut() {
                             let mut state = tab.terminal.lock().unwrap();
@@ -353,7 +354,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                         if scrollback_len > 0 {
                             scrollbar_dragging = true;
                             scrollbar_visible_until = Some(Instant::now() + SCROLLBAR_SHOW_DURATION);
-                            let tab_bar_offset = tabs.mouse_y_offset(ch);
+                            let tab_bar_offset = tabs.mouse_y_offset(drawer.tab_bar_height());
                             let content_h = screen_h - tab_bar_offset;
                             let ratio = ((y as f32) - tab_bar_offset).clamp(0.0, content_h) / content_h;
                             let rows = state.grid.cells().len();
@@ -369,7 +370,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                 }
 
                 let (screen_row, col) =
-                    selection::pixel_to_cell(x as f32, y as f32 - tabs.mouse_y_offset(ch), cw, ch);
+                    selection::pixel_to_cell(x as f32, y as f32 - tabs.mouse_y_offset(drawer.tab_bar_height()), cw, ch);
                 let abs_row = if let Some(tab) = tabs.active_tab() {
                     let state = tab.terminal.lock().unwrap();
                     let base = state
@@ -403,9 +404,8 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
             }
             AppEvent::MouseDragged(x, y) => {
                 if scrollbar_dragging {
-                    let (_, ch) = drawer.cell_size();
                     let screen_h = window.inner_size().1 as f32;
-                    let tab_bar_offset = tabs.mouse_y_offset(ch);
+                    let tab_bar_offset = tabs.mouse_y_offset(drawer.tab_bar_height());
                     let content_h = screen_h - tab_bar_offset;
                     let ratio = ((y as f32) - tab_bar_offset).clamp(0.0, content_h) / content_h;
                     if let Some(tab) = tabs.active_tab() {
@@ -424,7 +424,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     let (cw, ch) = drawer.cell_size();
                     let (screen_row, col) = selection::pixel_to_cell(
                         x as f32,
-                        y as f32 - tabs.mouse_y_offset(ch),
+                        y as f32 - tabs.mouse_y_offset(drawer.tab_bar_height()),
                         cw,
                         ch,
                     );
@@ -452,7 +452,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     continue;
                 }
                 let (screen_row, col) =
-                    selection::pixel_to_cell(x as f32, y as f32 - tabs.mouse_y_offset(ch), cw, ch);
+                    selection::pixel_to_cell(x as f32, y as f32 - tabs.mouse_y_offset(drawer.tab_bar_height()), cw, ch);
                 let abs_row = if let Some(tab) = tabs.active_tab() {
                     let state = tab.terminal.lock().unwrap();
                     let base = state
@@ -472,7 +472,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     let (cw, ch) = drawer.cell_size();
                     let (screen_row, col) = selection::pixel_to_cell(
                         x as f32,
-                        y as f32 - tabs.mouse_y_offset(ch),
+                        y as f32 - tabs.mouse_y_offset(drawer.tab_bar_height()),
                         cw,
                         ch,
                     );
@@ -537,8 +537,8 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                 }
                 drawer.resize(w, h);
                 let (cw, ch) = drawer.cell_size();
-                let (cols, rows) = zoom::calc_grid_size(w, h, cw, ch);
-                let term_rows = tabs.term_rows(rows);
+                let (cols, _rows) = zoom::calc_grid_size(w, h, cw, ch);
+                let term_rows = tabs.term_rows(h, ch, drawer.tab_bar_height());
                 for tab in tabs.tabs_mut() {
                     let mut state = tab.terminal.lock().unwrap();
                     state.grid.resize(cols, term_rows);
@@ -789,7 +789,6 @@ fn render_with_tabs(drawer: &mut GpuDrawer, tabs: &TabManager, preedit: &str, se
     let sel_range = sel.screen_normalized(view_base, visible_rows);
 
     let show_tab_bar = tabs.show_tab_bar();
-    let row_offset = if show_tab_bar { 1 } else { 0 };
     let preedit_pos_override = if preedit_str.is_some() {
         ink_state.preedit_pos(&visible)
     } else {
@@ -800,7 +799,7 @@ fn render_with_tabs(drawer: &mut GpuDrawer, tabs: &TabManager, preedit: &str, se
         cursor,
         preedit_str,
         sel_range,
-        row_offset,
+        0,
         state.palette,
         preedit_pos_override,
         if scrolled { None } else { Some(cursor_pos) },
@@ -809,7 +808,7 @@ fn render_with_tabs(drawer: &mut GpuDrawer, tabs: &TabManager, preedit: &str, se
     // Post-process: add UNDERLINE flag for hover URL range
     if let Some((abs_row, start_col, end_col)) = hover_url_range {
         if abs_row >= view_base && abs_row < view_base + visible_rows as u32 {
-            let screen_row = (abs_row - view_base) as u16 + row_offset;
+            let screen_row = (abs_row - view_base) as u16;
             for cmd in commands.iter_mut() {
                 if cmd.row == screen_row && cmd.col >= start_col && cmd.col < end_col {
                     cmd.flags |= growterm_types::CellFlags::UNDERLINE;

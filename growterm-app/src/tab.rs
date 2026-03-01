@@ -132,18 +132,18 @@ impl TabManager {
     }
 
     /// Terminal rows adjusted for tab bar presence.
-    pub fn term_rows(&self, total_rows: u16) -> u16 {
+    pub fn term_rows(&self, screen_h: u32, cell_h: f32, tab_bar_h: f32) -> u16 {
         if self.show_tab_bar() {
-            total_rows.saturating_sub(1).max(1)
+            ((screen_h as f32 - tab_bar_h) / cell_h).floor().max(1.0) as u16
         } else {
-            total_rows
+            (screen_h as f32 / cell_h).floor().max(1.0) as u16
         }
     }
 
     /// Y pixel offset for mouse events (tab bar height or 0).
-    pub fn mouse_y_offset(&self, cell_h: f32) -> f32 {
+    pub fn mouse_y_offset(&self, tab_bar_h: f32) -> f32 {
         if self.show_tab_bar() {
-            cell_h
+            tab_bar_h
         } else {
             0.0
         }
@@ -1067,12 +1067,12 @@ mod tests {
     }
 
     #[test]
-    fn mouse_y_offset_equals_cell_height_when_multiple_tabs() {
+    fn mouse_y_offset_equals_tab_bar_height_when_multiple_tabs() {
         let mut mgr = TabManager::new();
         mgr.add_tab(dummy_tab());
         mgr.add_tab(dummy_tab());
         assert!(mgr.show_tab_bar());
-        assert_eq!(mgr.mouse_y_offset(20.0), 20.0);
+        assert_eq!(mgr.mouse_y_offset(30.0), 30.0);
     }
 
     #[test]
