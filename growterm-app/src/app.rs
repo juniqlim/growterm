@@ -7,6 +7,7 @@ use growterm_macos::{AppEvent, MacWindow, Modifiers};
 
 use crate::ink_workaround::InkImeState;
 use crate::pomodoro::Pomodoro;
+use crate::response_timer::ResponseTimer;
 use crate::selection::{self, Selection};
 use crate::tab::{Tab, TabManager};
 use crate::url;
@@ -54,6 +55,11 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
     let mut test_input_sent = false;
     let mut test_drop_sent = false;
     let mut ink_state = InkImeState::new();
+    let mut response_timer = ResponseTimer::new();
+    if load_response_timer_enabled() {
+        response_timer.toggle();
+        window.set_response_timer_checked(true);
+    }
     let mut pomodoro = Pomodoro::new();
     if load_pomodoro_enabled() {
         pomodoro.toggle();
@@ -286,6 +292,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     pomodoro.on_input();
                     if bytes == b"\r" || bytes == b"\n" {
                         ink_state.on_enter();
+                        response_timer.on_enter();
                     } else {
                         ink_state.on_key_input(&bytes);
                     }
@@ -468,6 +475,14 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
             }
             AppEvent::RedrawRequested => {
                 pomodoro.tick();
+                // Feed PTY output timestamp to response timer
+                if let Some(tab) = tabs.active_tab() {
+                    let ts = tab.last_pty_output_at.lock().unwrap().take();
+                    if let Some(ts) = ts {
+                        response_timer.on_pty_output(ts);
+                    }
+                }
+                response_timer.tick();
                 let was_dirty = tabs
                     .active_tab()
                     .map_or(false, |t| t.dirty.swap(false, Ordering::Relaxed));
@@ -475,11 +490,8 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                 if preedit_changed {
                     prev_preedit = preedit.clone();
                 }
-                // Update window title with pomodoro timer
-                let title = match pomodoro.display_text() {
-                    Some(t) => t,
-                    None => "growterm".to_string(),
-                };
+                // Update window title with pomodoro + response timer
+                let title = build_title(&pomodoro, &response_timer);
                 window.set_title(&title);
                 render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range, pomodoro.is_input_blocked());
                 if was_dirty || preedit_changed {
@@ -564,10 +576,15 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                 let enabled = pomodoro.is_enabled();
                 save_pomodoro_enabled(enabled);
                 window.set_pomodoro_checked(enabled);
-                let title = match pomodoro.display_text() {
-                    Some(t) => t,
-                    None => "growterm".to_string(),
-                };
+                let title = build_title(&pomodoro, &response_timer);
+                window.set_title(&title);
+            }
+            AppEvent::ToggleResponseTimer => {
+                response_timer.toggle();
+                let enabled = response_timer.is_enabled();
+                save_response_timer_enabled(enabled);
+                window.set_response_timer_checked(enabled);
+                let title = build_title(&pomodoro, &response_timer);
                 window.set_title(&title);
             }
             AppEvent::CloseRequested => {
@@ -577,6 +594,15 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
     }
 }
 
+
+fn build_title(pomodoro: &Pomodoro, response_timer: &ResponseTimer) -> String {
+    match (pomodoro.display_text(), response_timer.display_text()) {
+        (Some(p), Some(r)) => format!("{p} | {r}"),
+        (Some(p), None) => p,
+        (None, Some(r)) => format!("growterm | {r}"),
+        (None, None) => "growterm".to_string(),
+    }
+}
 
 fn pomodoro_config_path() -> std::path::PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
@@ -594,6 +620,28 @@ fn load_pomodoro_enabled() -> bool {
 
 fn save_pomodoro_enabled(enabled: bool) {
     let path = pomodoro_config_path();
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(path, if enabled { "1" } else { "0" });
+}
+
+fn response_timer_config_path() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    std::path::PathBuf::from(home)
+        .join(".config")
+        .join("growterm")
+        .join("response_timer_enabled")
+}
+
+fn load_response_timer_enabled() -> bool {
+    std::fs::read_to_string(response_timer_config_path())
+        .map(|s| s.trim() == "1")
+        .unwrap_or(false)
+}
+
+fn save_response_timer_enabled(enabled: bool) {
+    let path = response_timer_config_path();
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }

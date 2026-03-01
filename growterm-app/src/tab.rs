@@ -1,6 +1,7 @@
 use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use growterm_grid::Grid;
 use growterm_macos::MacWindow;
@@ -13,6 +14,7 @@ pub struct Tab {
     pub terminal: Arc<Mutex<TerminalState>>,
     pub pty_writer: PtyWriter,
     pub dirty: Arc<AtomicBool>,
+    pub last_pty_output_at: Arc<Mutex<Option<Instant>>>,
 }
 
 pub struct TerminalState {
@@ -194,6 +196,7 @@ impl Tab {
             palette: TerminalPalette::default(),
         }));
         let dirty = Arc::new(AtomicBool::new(false));
+        let last_pty_output_at = Arc::new(Mutex::new(None));
         let pty_writer = match growterm_pty::spawn_with_cwd(rows, cols, cwd) {
             Ok((reader, writer)) => {
                 let responder = writer.responder();
@@ -202,6 +205,7 @@ impl Tab {
                     responder,
                     Arc::clone(&terminal),
                     Arc::clone(&dirty),
+                    Arc::clone(&last_pty_output_at),
                     window,
                 );
                 writer
@@ -213,6 +217,7 @@ impl Tab {
             terminal,
             pty_writer,
             dirty,
+            last_pty_output_at,
         })
     }
 }
@@ -222,6 +227,7 @@ fn start_io_thread(
     responder: growterm_pty::PtyResponder,
     terminal: Arc<Mutex<TerminalState>>,
     dirty: Arc<AtomicBool>,
+    last_pty_output_at: Arc<Mutex<Option<Instant>>>,
     window: Arc<MacWindow>,
 ) {
     std::thread::spawn(move || {
@@ -234,6 +240,7 @@ fn start_io_thread(
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
+                    *last_pty_output_at.lock().unwrap() = Some(Instant::now());
                     pending_queries.extend_from_slice(&buf[..n]);
                     let controls = extract_terminal_controls(&mut pending_queries);
 
@@ -733,6 +740,7 @@ mod tests {
             terminal,
             pty_writer,
             dirty,
+            last_pty_output_at: Arc::new(Mutex::new(None)),
         }
     }
 

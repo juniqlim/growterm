@@ -192,6 +192,11 @@ define_class! {
             self.send_event(AppEvent::TogglePomodoro);
         }
 
+        #[unsafe(method(toggleResponseTimer:))]
+        fn toggle_response_timer(&self, _sender: &AnyObject) {
+            self.send_event(AppEvent::ToggleResponseTimer);
+        }
+
         #[unsafe(method(viewDidChangeBackingProperties))]
         fn view_did_change_backing_properties(&self) {
             let _: () = unsafe { msg_send![super(self), viewDidChangeBackingProperties] };

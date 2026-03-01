@@ -98,6 +98,16 @@ fn setup_main_menu(app: &NSApplication) {
             &pomodoro_key,
         );
         view_menu.addItem(&pomodoro_item);
+
+        let response_timer_title = NSString::from_str("Response Timer");
+        let response_timer_key = NSString::from_str("r");
+        let response_timer_item = NSMenuItem::initWithTitle_action_keyEquivalent(
+            mtm.alloc(),
+            &response_timer_title,
+            Some(objc2::sel!(toggleResponseTimer:)),
+            &response_timer_key,
+        );
+        view_menu.addItem(&response_timer_item);
         view_menu_item.setSubmenu(Some(&view_menu));
 
         app.setMainMenu(Some(&menubar));

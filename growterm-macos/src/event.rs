@@ -27,6 +27,8 @@ pub enum AppEvent {
     FileDropped(Vec<String>),
     /// 뽀모도로 타이머 토글
     TogglePomodoro,
+    /// 응답 타이머 토글
+    ToggleResponseTimer,
 }
 
 bitflags::bitflags! {

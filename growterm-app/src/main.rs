@@ -1,6 +1,7 @@
 mod app;
 mod ink_workaround;
 mod pomodoro;
+mod response_timer;
 #[allow(dead_code)]
 mod selection;
 mod tab;

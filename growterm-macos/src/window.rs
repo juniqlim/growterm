@@ -129,21 +129,11 @@ impl MacWindow {
     }
 
     pub fn set_pomodoro_checked(&self, checked: bool) {
-        dispatch_async_main(move || {
-            let mtm = MainThreadMarker::new().unwrap();
-            let app = objc2_app_kit::NSApplication::sharedApplication(mtm);
-            if let Some(menu) = app.mainMenu() {
-                // View menu is item at index 1
-                if let Some(view_menu_item) = menu.itemAtIndex(1) {
-                    if let Some(view_menu) = view_menu_item.submenu() {
-                        if let Some(pomodoro_item) = view_menu.itemAtIndex(0) {
-                            let state = if checked { 1 } else { 0 };
-                            pomodoro_item.setState(state);
-                        }
-                    }
-                }
-            }
-        });
+        set_view_menu_item_checked(0, checked);
+    }
+
+    pub fn set_response_timer_checked(&self, checked: bool) {
+        set_view_menu_item_checked(1, checked);
     }
 
     pub fn show(&self) {
@@ -153,6 +143,23 @@ impl MacWindow {
     pub fn ns_window(&self) -> &NSWindow {
         &self.ns_window
     }
+}
+
+fn set_view_menu_item_checked(index: isize, checked: bool) {
+    dispatch_async_main(move || {
+        let mtm = MainThreadMarker::new().unwrap();
+        let app = objc2_app_kit::NSApplication::sharedApplication(mtm);
+        if let Some(menu) = app.mainMenu() {
+            if let Some(view_menu_item) = menu.itemAtIndex(1) {
+                if let Some(view_menu) = view_menu_item.submenu() {
+                    if let Some(item) = view_menu.itemAtIndex(index) {
+                        let state = if checked { 1 } else { 0 };
+                        item.setState(state);
+                    }
+                }
+            }
+        }
+    });
 }
 
 unsafe impl Send for MacWindow {}
