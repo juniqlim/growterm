@@ -136,18 +136,18 @@ impl ResponseTimer {
             return None;
         }
         let avg_part = if self.count > 0 {
-            format!(" ({}s/{})", (self.total_sum / self.count).as_secs(), self.count)
+            format!("({}s/{})", (self.total_sum / self.count).as_secs(), self.count)
         } else {
             String::new()
         };
         match self.state {
             State::WaitingForFirstByte | State::Receiving => {
                 let elapsed = self.enter_at.map(|e| now.duration_since(e))?;
-                Some(format!("⏱ {}s{}", elapsed.as_secs(), avg_part))
+                Some(format!("⏱\u{200A}{}s{}", elapsed.as_secs(), avg_part))
             }
             State::Idle => {
                 let total = self.last_total?;
-                Some(format!("⏱ {}s{}", total.as_secs(), avg_part))
+                Some(format!("⏱\u{200A}{}s{}", total.as_secs(), avg_part))
             }
         }
     }
@@ -214,7 +214,7 @@ mod tests {
         let text = rt
             .display_text_at(now + Duration::from_secs(2))
             .unwrap();
-        assert_eq!(text, "⏱ 2s");
+        assert_eq!(text, "⏱\u{200A}2s");
     }
 
     #[test]
@@ -231,7 +231,7 @@ mod tests {
         let text = rt
             .display_text_at(now + Duration::from_secs(12))
             .unwrap();
-        assert_eq!(text, "⏱ 2s (3s/1)");
+        assert_eq!(text, "⏱\u{200A}2s(3s/1)");
     }
 
     #[test]
@@ -253,7 +253,7 @@ mod tests {
         let text = rt
             .display_text_at(now + Duration::from_secs(5))
             .unwrap();
-        assert_eq!(text, "⏱ 5s");
+        assert_eq!(text, "⏱\u{200A}5s");
     }
 
     #[test]
@@ -283,7 +283,7 @@ mod tests {
         let text = rt
             .display_text_at(now + Duration::from_secs(10))
             .unwrap();
-        assert_eq!(text, "⏱ 5s (5s/1)");
+        assert_eq!(text, "⏱\u{200A}5s(5s/1)");
     }
 
     #[test]
@@ -308,7 +308,7 @@ mod tests {
         let text = rt
             .display_text_at(t2 + Duration::from_secs(10))
             .unwrap();
-        assert_eq!(text, "⏱ 4s (3s/2)");
+        assert_eq!(text, "⏱\u{200A}4s(3s/2)");
     }
 
     #[test]
@@ -376,7 +376,7 @@ mod tests {
         let text = rt
             .display_text_at(t2 + Duration::from_secs(10))
             .unwrap();
-        assert_eq!(text, "⏱ 5s (5s/1)");
+        assert_eq!(text, "⏱\u{200A}5s(5s/1)");
     }
 
     #[test]

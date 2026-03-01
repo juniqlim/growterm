@@ -685,7 +685,7 @@ fn build_title(pomodoro: &Pomodoro, tabs: &TabManager) -> String {
         }
     }
     let avg_text = if any_enabled && total_count > 0 {
-        Some(format!("({}s/{})", (total_sum / total_count).as_secs(), total_count))
+        Some(format!("{}s/{}", (total_sum / total_count).as_secs(), total_count))
     } else {
         None
     };
@@ -789,7 +789,6 @@ fn render_with_tabs(drawer: &mut GpuDrawer, tabs: &TabManager, preedit: &str, se
     let sel_range = sel.screen_normalized(view_base, visible_rows);
 
     let show_tab_bar = tabs.show_tab_bar();
-    let (cell_w, cell_h) = drawer.cell_size();
     let row_offset = if show_tab_bar { 1 } else { 0 };
     let preedit_pos_override = if preedit_str.is_some() {
         ink_state.preedit_pos(&visible)
@@ -825,8 +824,6 @@ fn render_with_tabs(drawer: &mut GpuDrawer, tabs: &TabManager, preedit: &str, se
         Some(TabBarInfo {
             titles: tabs.tab_bar_info().titles,
             active_index: tabs.tab_bar_info().active_index,
-            cell_h,
-            cell_w,
         })
     } else {
         None

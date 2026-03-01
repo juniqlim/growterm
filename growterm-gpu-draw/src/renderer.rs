@@ -40,10 +40,12 @@ pub struct GpuDrawer {
     glyph_texture_bind_group: wgpu::BindGroup,
     glyph_texture_size: u32,
     atlas: GlyphAtlas,
+    tab_atlas: GlyphAtlas,
     atlas_cursor_x: u32,
     atlas_cursor_y: u32,
     atlas_row_height: u32,
     glyph_regions: std::collections::HashMap<char, GlyphRegion>,
+    tab_glyph_regions: std::collections::HashMap<char, GlyphRegion>,
     surface_dirty: bool,
 }
 
@@ -60,13 +62,12 @@ struct GlyphRegion {
 }
 
 const GLYPH_TEXTURE_SIZE: u32 = 1024;
+const TAB_FONT_SIZE: f32 = 24.0;
 
 /// Tab bar rendering info passed from the app layer.
 pub struct TabBarInfo {
     pub titles: Vec<String>,
     pub active_index: usize,
-    pub cell_h: f32,
-    pub cell_w: f32,
 }
 
 impl GpuDrawer {
@@ -361,6 +362,7 @@ impl GpuDrawer {
         });
 
         let atlas = GlyphAtlas::new(font_size);
+        let tab_atlas = GlyphAtlas::new(TAB_FONT_SIZE);
 
         Self {
             device,
@@ -377,10 +379,12 @@ impl GpuDrawer {
             glyph_texture_bind_group,
             glyph_texture_size: GLYPH_TEXTURE_SIZE,
             atlas,
+            tab_atlas,
             atlas_cursor_x: 0,
             atlas_cursor_y: 0,
             atlas_row_height: 0,
             glyph_regions: std::collections::HashMap::new(),
+            tab_glyph_regions: std::collections::HashMap::new(),
             surface_dirty: false,
         }
     }
@@ -388,6 +392,7 @@ impl GpuDrawer {
     pub fn set_font_size(&mut self, size: f32) {
         self.atlas.set_size(size);
         self.glyph_regions.clear();
+        self.tab_glyph_regions.clear();
         self.atlas_cursor_x = 0;
         self.atlas_cursor_y = 0;
         self.atlas_row_height = 0;
@@ -407,6 +412,10 @@ impl GpuDrawer {
 
     pub fn cell_size(&self) -> (f32, f32) {
         self.atlas.cell_size()
+    }
+
+    pub fn tab_cell_size(&self) -> (f32, f32) {
+        self.tab_atlas.cell_size()
     }
 
     pub fn draw(
@@ -693,7 +702,9 @@ impl GpuDrawer {
 
         // Tab bar
         if let Some(tab_info) = tab_bar {
-            let bar_h = tab_info.cell_h;
+            let (tab_cw, tab_ch) = self.tab_atlas.cell_size();
+            let tab_ascent = self.tab_atlas.ascent();
+            let bar_h = cell_h;
             let screen_w = self.surface_config.width as f32;
             let bar_bg: [f32; 3] = [0.15, 0.15, 0.15];
             let active_bg: [f32; 3] = [0.3, 0.3, 0.3];
@@ -708,16 +719,16 @@ impl GpuDrawer {
                     push_rect(&mut bg_vertices, x, 0.0, tab_w, bar_h, active_bg);
                 }
 
-                let text_w = title.chars().count() as f32 * tab_info.cell_w;
+                let text_w = title.chars().count() as f32 * tab_cw;
                 let mut cx = x + (tab_w - text_w) / 2.0;
                 for ch in title.chars() {
                     if ch == ' ' {
-                        cx += tab_info.cell_w;
+                        cx += tab_cw;
                         continue;
                     }
-                    let region = self.ensure_glyph_in_atlas(ch);
+                    let region = self.ensure_tab_glyph_in_atlas(ch);
                     if region.width > 0 && region.height > 0 {
-                        let baseline_y = bar_h * 0.8;
+                        let baseline_y = (bar_h - tab_ch) / 2.0 + tab_ascent;
                         let gx = cx + region.offset_x;
                         let gy = baseline_y - region.offset_y - region.height as f32;
                         let gw = region.width as f32;
@@ -758,7 +769,7 @@ impl GpuDrawer {
                             color,
                         });
                     }
-                    cx += tab_info.cell_w;
+                    cx += tab_cw;
                 }
 
                 x += tab_w;
@@ -844,6 +855,62 @@ impl GpuDrawer {
 
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
+    }
+
+    fn ensure_tab_glyph_in_atlas(&mut self, c: char) -> GlyphRegion {
+        if let Some(&region) = self.tab_glyph_regions.get(&c) {
+            return region;
+        }
+
+        let glyph = self.tab_atlas.get_or_insert(c);
+        let w = glyph.width;
+        let h = glyph.height;
+
+        if w == 0 || h == 0 {
+            let region = GlyphRegion {
+                u0: 0.0, v0: 0.0, u1: 0.0, v1: 0.0,
+                width: 0, height: 0, offset_x: 0.0, offset_y: 0.0,
+            };
+            self.tab_glyph_regions.insert(c, region);
+            return region;
+        }
+
+        if self.atlas_cursor_x + w > self.glyph_texture_size {
+            self.atlas_cursor_x = 0;
+            self.atlas_cursor_y += self.atlas_row_height;
+            self.atlas_row_height = 0;
+        }
+
+        let x = self.atlas_cursor_x;
+        let y = self.atlas_cursor_y;
+        self.atlas_cursor_x += w;
+        self.atlas_row_height = self.atlas_row_height.max(h);
+
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.glyph_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d { x, y, z: 0 },
+                aspect: wgpu::TextureAspect::All,
+            },
+            &glyph.bitmap,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(w),
+                rows_per_image: None,
+            },
+            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        );
+
+        let ts = self.glyph_texture_size as f32;
+        let region = GlyphRegion {
+            u0: x as f32 / ts, v0: y as f32 / ts,
+            u1: (x + w) as f32 / ts, v1: (y + h) as f32 / ts,
+            width: w, height: h,
+            offset_x: glyph.offset_x, offset_y: glyph.offset_y,
+        };
+        self.tab_glyph_regions.insert(c, region);
+        region
     }
 
     fn ensure_glyph_in_atlas(&mut self, c: char) -> GlyphRegion {

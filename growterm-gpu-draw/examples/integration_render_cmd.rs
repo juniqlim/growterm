@@ -116,7 +116,7 @@ impl ApplicationHandler for App {
                     // Integration pipeline: Cell → generate() → draw()
                     let commands =
                         generate(&self.grid, None, None, None, TerminalPalette::default());
-                    drawer.draw(&commands, None, None);
+                    drawer.draw(&commands, None, None, false);
                 }
             }
             _ => {}
