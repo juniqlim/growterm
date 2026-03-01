@@ -41,8 +41,13 @@ impl TabManager {
     }
 
     pub fn add_tab(&mut self, tab: Tab) {
-        self.tabs.push(tab);
-        self.active = self.tabs.len() - 1;
+        let insert_at = if self.tabs.is_empty() {
+            0
+        } else {
+            self.active + 1
+        };
+        self.tabs.insert(insert_at, tab);
+        self.active = insert_at;
     }
 
     pub fn close_tab(&mut self, index: usize) -> Option<Tab> {
@@ -741,6 +746,20 @@ mod tests {
         mgr.add_tab(dummy_tab());
         assert_eq!(mgr.tab_count(), 2);
         assert_eq!(mgr.active_index(), 1);
+    }
+
+    #[test]
+    fn add_tab_inserts_after_active() {
+        let mut mgr = TabManager::new();
+        mgr.add_tab(dummy_tab()); // tab A at 0
+        mgr.add_tab(dummy_tab()); // tab B at 1
+        mgr.add_tab(dummy_tab()); // tab C at 2
+
+        // Switch to tab 0 (A), then add a new tab
+        mgr.switch_to(0);
+        mgr.add_tab(dummy_tab()); // tab D should be at index 1
+        assert_eq!(mgr.tab_count(), 4);
+        assert_eq!(mgr.active_index(), 1); // new tab is active at index 1
     }
 
     #[test]
