@@ -692,8 +692,8 @@ fn build_title(pomodoro: &Pomodoro, tabs: &TabManager) -> String {
     match (pomodoro.display_text(), avg_text) {
         (Some(p), Some(a)) => format!("{p} | {a}"),
         (Some(p), None) => p,
-        (None, Some(a)) => format!("growterm | {a}"),
-        (None, None) => "growterm".to_string(),
+        (None, Some(a)) => a,
+        (None, None) => "growTerm".to_string(),
     }
 }
 
