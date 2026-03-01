@@ -27,6 +27,7 @@ pub fn encode(event: KeyEvent) -> Vec<u8> {
                 s.as_bytes().to_vec()
             }
         }
+        Key::Enter if has_shift => b"\x1b[13;2u".to_vec(),
         Key::Enter => vec![b'\r'],
         Key::Tab => vec![b'\t'],
         Key::Escape => vec![0x1b],
@@ -113,6 +114,12 @@ mod tests {
     fn enter() {
         let event = KeyEvent { key: Key::Enter, modifiers: Modifiers::empty() };
         assert_eq!(encode(event), b"\r");
+    }
+
+    #[test]
+    fn shift_enter() {
+        let event = KeyEvent { key: Key::Enter, modifiers: Modifiers::SHIFT };
+        assert_eq!(encode(event), b"\x1b[13;2u");
     }
 
     #[test]
