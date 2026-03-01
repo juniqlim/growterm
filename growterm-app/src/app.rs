@@ -101,14 +101,18 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                 use growterm_macos::key_convert::keycode as kc;
 
                 if modifiers.contains(Modifiers::SUPER) {
-                    // Cmd+T: new tab
+                    // Cmd+T: new tab (inherit CWD from active tab)
                     if keycode == kc::ANSI_T {
                         let (cw, ch) = drawer.cell_size();
                         let (w, h) = window.inner_size();
                         let (cols, rows) = zoom::calc_grid_size(w, h, cw, ch);
                         let had_no_tab_bar = !tabs.show_tab_bar();
                         let term_rows = rows.saturating_sub(1).max(1);
-                        match Tab::spawn(term_rows, cols, window.clone()) {
+                        let active_cwd = tabs
+                            .active_tab()
+                            .and_then(|t| t.pty_writer.child_pid())
+                            .and_then(growterm_pty::child_cwd);
+                        match Tab::spawn_with_cwd(term_rows, cols, window.clone(), active_cwd.as_deref()) {
                             Ok(tab) => {
                                 tabs.add_tab(tab);
                                 sel.clear();

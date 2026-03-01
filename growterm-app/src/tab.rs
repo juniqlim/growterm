@@ -172,6 +172,15 @@ impl TabManager {
 
 impl Tab {
     pub fn spawn(rows: u16, cols: u16, window: Arc<MacWindow>) -> Result<Self, std::io::Error> {
+        Self::spawn_with_cwd(rows, cols, window, None)
+    }
+
+    pub fn spawn_with_cwd(
+        rows: u16,
+        cols: u16,
+        window: Arc<MacWindow>,
+        cwd: Option<&std::path::Path>,
+    ) -> Result<Self, std::io::Error> {
         let grid = Grid::new(cols, rows);
         let vt_parser = VtParser::new();
         let terminal = Arc::new(Mutex::new(TerminalState {
@@ -180,7 +189,7 @@ impl Tab {
             palette: TerminalPalette::default(),
         }));
         let dirty = Arc::new(AtomicBool::new(false));
-        let pty_writer = match growterm_pty::spawn(rows, cols) {
+        let pty_writer = match growterm_pty::spawn_with_cwd(rows, cols, cwd) {
             Ok((reader, writer)) => {
                 let responder = writer.responder();
                 start_io_thread(
