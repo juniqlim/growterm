@@ -136,7 +136,7 @@ impl ResponseTimer {
             return None;
         }
         let avg_part = if self.count > 0 {
-            format!(" avg {}s/{}", (self.total_sum / self.count).as_secs(), self.count)
+            format!(" ({}s/{})", (self.total_sum / self.count).as_secs(), self.count)
         } else {
             String::new()
         };
@@ -231,7 +231,7 @@ mod tests {
         let text = rt
             .display_text_at(now + Duration::from_secs(12))
             .unwrap();
-        assert_eq!(text, "⏱ 2s avg 3s/1");
+        assert_eq!(text, "⏱ 2s (3s/1)");
     }
 
     #[test]
@@ -283,7 +283,7 @@ mod tests {
         let text = rt
             .display_text_at(now + Duration::from_secs(10))
             .unwrap();
-        assert_eq!(text, "⏱ 5s avg 5s/1");
+        assert_eq!(text, "⏱ 5s (5s/1)");
     }
 
     #[test]
@@ -308,7 +308,7 @@ mod tests {
         let text = rt
             .display_text_at(t2 + Duration::from_secs(10))
             .unwrap();
-        assert_eq!(text, "⏱ 4s avg 3s/2");
+        assert_eq!(text, "⏱ 4s (3s/2)");
     }
 
     #[test]
@@ -376,7 +376,7 @@ mod tests {
         let text = rt
             .display_text_at(t2 + Duration::from_secs(10))
             .unwrap();
-        assert_eq!(text, "⏱ 5s avg 5s/1");
+        assert_eq!(text, "⏱ 5s (5s/1)");
     }
 
     #[test]

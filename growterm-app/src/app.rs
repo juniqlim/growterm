@@ -685,7 +685,7 @@ fn build_title(pomodoro: &Pomodoro, tabs: &TabManager) -> String {
         }
     }
     let avg_text = if any_enabled && total_count > 0 {
-        Some(format!("avg {}s/{}", (total_sum / total_count).as_secs(), total_count))
+        Some(format!("({}s/{})", (total_sum / total_count).as_secs(), total_count))
     } else {
         None
     };
