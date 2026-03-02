@@ -431,6 +431,7 @@ impl GpuDrawer {
         scrollbar: Option<(f32, f32)>,
         tab_bar: Option<&TabBarInfo>,
         is_break: bool,
+        break_text: Option<&[String]>,
     ) {
         if self.surface_dirty {
             self.surface_dirty = false;
@@ -863,6 +864,84 @@ impl GpuDrawer {
                 pass.set_bind_group(0, &self.uniform_bind_group, &[]);
                 pass.set_vertex_buffer(0, overlay_buffer.slice(..));
                 pass.draw(0..overlay_verts.len() as u32, 0..1);
+            }
+
+            // Pass 4: coaching text over break overlay
+            if let Some(lines) = break_text {
+                let screen_w = self.surface_config.width as f32;
+                let screen_h = self.surface_config.height as f32;
+                let (tab_cw, tab_ch) = self.tab_atlas.cell_size();
+                let tab_ascent = self.tab_atlas.ascent();
+
+                let total_height = lines.len() as f32 * tab_ch;
+                let start_y = (screen_h - total_height) / 2.0;
+
+                let mut coaching_verts: Vec<GlyphVertex> = Vec::new();
+                for (line_idx, line) in lines.iter().enumerate() {
+                    let text_w = line.chars().count() as f32 * tab_cw;
+                    let mut cx = (screen_w - text_w) / 2.0;
+                    let line_y = start_y + line_idx as f32 * tab_ch;
+
+                    for ch in line.chars() {
+                        if ch == ' ' {
+                            cx += tab_cw;
+                            continue;
+                        }
+                        let region = self.ensure_tab_glyph_in_atlas(ch);
+                        if region.width > 0 && region.height > 0 {
+                            let baseline_y = line_y + tab_ascent;
+                            let gx = cx + region.offset_x;
+                            let gy = baseline_y - region.offset_y - region.height as f32;
+                            let gw = region.width as f32;
+                            let gh = region.height as f32;
+                            let color: [f32; 3] = [1.0, 1.0, 1.0];
+                            coaching_verts.push(GlyphVertex {
+                                position: [gx, gy],
+                                tex_coords: [region.u0, region.v0],
+                                color,
+                            });
+                            coaching_verts.push(GlyphVertex {
+                                position: [gx + gw, gy],
+                                tex_coords: [region.u1, region.v0],
+                                color,
+                            });
+                            coaching_verts.push(GlyphVertex {
+                                position: [gx, gy + gh],
+                                tex_coords: [region.u0, region.v1],
+                                color,
+                            });
+                            coaching_verts.push(GlyphVertex {
+                                position: [gx + gw, gy],
+                                tex_coords: [region.u1, region.v0],
+                                color,
+                            });
+                            coaching_verts.push(GlyphVertex {
+                                position: [gx + gw, gy + gh],
+                                tex_coords: [region.u1, region.v1],
+                                color,
+                            });
+                            coaching_verts.push(GlyphVertex {
+                                position: [gx, gy + gh],
+                                tex_coords: [region.u0, region.v1],
+                                color,
+                            });
+                        }
+                        cx += tab_cw;
+                    }
+                }
+
+                if !coaching_verts.is_empty() {
+                    let coaching_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("coaching_vb"),
+                        contents: bytemuck::cast_slice(&coaching_verts),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+                    pass.set_pipeline(&self.glyph_pipeline);
+                    pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+                    pass.set_bind_group(1, &self.glyph_texture_bind_group, &[]);
+                    pass.set_vertex_buffer(0, coaching_buffer.slice(..));
+                    pass.draw(0..coaching_verts.len() as u32, 0..1);
+                }
             }
         }
 

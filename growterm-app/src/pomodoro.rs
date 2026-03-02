@@ -92,6 +92,18 @@ impl Pomodoro {
         self.enabled && self.phase == Phase::Break
     }
 
+    pub fn coaching_lines(&self) -> Option<Vec<String>> {
+        if self.phase != Phase::Break {
+            return None;
+        }
+        Some(vec![
+            "[Coaching]".to_string(),
+            String::new(),
+            "25분 집중 완료!".to_string(),
+            "잠시 눈을 쉬고, 다음 목표를 정리해보세요.".to_string(),
+        ])
+    }
+
     /// Returns display text for the timer, or None if idle.
     pub fn display_text(&self) -> Option<String> {
         self.display_text_at(Instant::now())
@@ -244,6 +256,32 @@ mod tests {
         let text = p.display_text_at(break_start + Duration::from_secs(15)).unwrap();
         assert!(text.starts_with('\u{2615}')); // ☕
         assert!(text.contains("02:45"));
+    }
+
+    #[test]
+    fn coaching_lines_returns_text_during_break() {
+        let mut p = enabled_pomodoro();
+        let now = Instant::now();
+        p.on_input_at(now);
+
+        let break_start = now + Duration::from_secs(WORK_SECS);
+        p.tick_at(break_start);
+        assert_eq!(p.phase(), Phase::Break);
+
+        let lines = p.coaching_lines().expect("should return lines during break");
+        assert_eq!(lines[0], "[Coaching]");
+        assert!(lines.len() >= 3);
+    }
+
+    #[test]
+    fn coaching_lines_returns_none_when_not_break() {
+        let mut p = enabled_pomodoro();
+        assert!(p.coaching_lines().is_none(), "Idle -> None");
+
+        let now = Instant::now();
+        p.on_input_at(now);
+        assert_eq!(p.phase(), Phase::Working);
+        assert!(p.coaching_lines().is_none(), "Working -> None");
     }
 
     #[test]
