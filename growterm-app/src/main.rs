@@ -1,4 +1,5 @@
 mod app;
+mod copy_mode;
 mod ink_workaround;
 mod pomodoro;
 mod response_timer;

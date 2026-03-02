@@ -115,6 +115,14 @@ impl MacWindow {
         }
     }
 
+    pub fn set_copy_mode(&self, enabled: bool) {
+        let raw = Retained::as_ptr(&self.view) as usize;
+        dispatch_async_main(move || {
+            let view = unsafe { &*(raw as *const TerminalView) };
+            view.set_copy_mode_bypass_ime(enabled);
+        });
+    }
+
     pub fn discard_marked_text(&self) {
         let raw = Retained::as_ptr(&self.view) as usize;
         dispatch_async_main(move || {

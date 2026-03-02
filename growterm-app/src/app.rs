@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 use growterm_gpu_draw::{GpuDrawer, TabBarInfo};
 use growterm_macos::{AppEvent, MacWindow, Modifiers};
 
+use crate::copy_mode::CopyMode;
 use crate::ink_workaround::InkImeState;
 use crate::pomodoro::Pomodoro;
 use crate::selection::{self, Selection};
@@ -62,6 +63,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
         }
         window.set_response_timer_checked(true);
     }
+    let mut copy_mode = CopyMode::new();
     let mut pomodoro = Pomodoro::new();
     if load_pomodoro_enabled() {
         pomodoro.toggle();
@@ -129,6 +131,10 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                             Ok(mut tab) => {
                                 tab.response_timer.set_enabled(response_timer_enabled);
                                 tabs.add_tab(tab);
+                                if copy_mode.active {
+                                    copy_mode.exit(&mut sel);
+                                    window.set_copy_mode(false);
+                                }
                                 sel.clear();
                                 preedit.clear();
                                 window.discard_marked_text();
@@ -155,6 +161,10 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                         if tabs.is_empty() {
                             std::process::exit(0);
                         }
+                        if copy_mode.active {
+                            copy_mode.exit(&mut sel);
+                            window.set_copy_mode(false);
+                        }
                         sel.clear();
                         preedit.clear();
                         // Tab bar just disappeared — expand remaining tab by 1 row
@@ -177,6 +187,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     if modifiers.contains(Modifiers::SHIFT) {
                         if keycode == kc::ANSI_LEFT_BRACKET {
                             tabs.prev_tab();
+                            if copy_mode.active { copy_mode.exit(&mut sel); window.set_copy_mode(false); }
                             sel.clear();
                             preedit.clear();
                             window.discard_marked_text();
@@ -185,6 +196,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                         }
                         if keycode == kc::ANSI_RIGHT_BRACKET {
                             tabs.next_tab();
+                            if copy_mode.active { copy_mode.exit(&mut sel); window.set_copy_mode(false); }
                             sel.clear();
                             preedit.clear();
                             window.discard_marked_text();
@@ -209,6 +221,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     if let Some(idx) = tab_num {
                         if idx < tabs.tab_count() {
                             tabs.switch_to(idx);
+                            if copy_mode.active { copy_mode.exit(&mut sel); window.set_copy_mode(false); }
                             sel.clear();
                             preedit.clear();
                             window.discard_marked_text();
@@ -246,6 +259,23 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                         }
                         scrollbar_visible_until = Some(Instant::now() + SCROLLBAR_SHOW_DURATION);
                         render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range, pomodoro.is_input_blocked(), true);
+                        continue;
+                    }
+
+                    // Cmd+Shift+C: 복사모드 진입
+                    if keycode == kc::ANSI_C && modifiers.contains(Modifiers::SHIFT) {
+                        if let Some(tab) = tabs.active_tab() {
+                            let state = tab.terminal.lock().unwrap();
+                            let sb_len = state.grid.scrollback_len() as u32;
+                            let (cursor_row, _cursor_col) = state.grid.cursor_pos();
+                            let abs_cursor_row = sb_len + cursor_row as u32;
+                            let cols = state.grid.cells().first().map_or(80, |r| r.len()) as u16;
+                            drop(state);
+                            copy_mode.enter(abs_cursor_row, cols, &mut sel);
+                            window.set_copy_mode(true);
+                            window.discard_marked_text();
+                        }
+                        render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range, pomodoro.is_input_blocked(), scrollbar_dragging || scrollbar_visible_until.map_or(false, |t| t > Instant::now()));
                         continue;
                     }
 
@@ -304,6 +334,62 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                         render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range, pomodoro.is_input_blocked(), scrollbar_dragging || scrollbar_visible_until.map_or(false, |t| t > Instant::now()));
                         continue;
                     }
+                    continue;
+                }
+
+                // 복사모드: PTY 전송 건너뛰고 raw keycode로 처리
+                if copy_mode.active {
+                    let cols = tabs.active_tab().map_or(80u16, |t| {
+                        let state = t.terminal.lock().unwrap();
+                        state.grid.cells().first().map_or(80, |r| r.len()) as u16
+                    });
+                    let max_row = tabs.active_tab().map_or(0u32, |t| {
+                        let state = t.terminal.lock().unwrap();
+                        let sb_len = state.grid.scrollback_len() as u32;
+                        let screen_rows = state.grid.cells().len() as u32;
+                        sb_len + screen_rows - 1
+                    });
+
+                    match keycode {
+                        kc::ANSI_J => {
+                            copy_mode.move_down(cols, max_row, &mut sel);
+                        }
+                        kc::ANSI_K => {
+                            copy_mode.move_up(cols, &mut sel);
+                        }
+                        kc::ANSI_V => {
+                            copy_mode.toggle_visual(cols, &mut sel);
+                        }
+                        kc::ANSI_H => {
+                            copy_mode.move_left(cols, max_row, &mut sel);
+                        }
+                        kc::ANSI_L => {
+                            copy_mode.move_right(cols, max_row, &mut sel);
+                        }
+                        kc::ANSI_Y => {
+                            // y: 선택 텍스트 클립보드에 복사 후 모드 종료
+                            if !sel.is_empty() {
+                                if let Some(tab) = tabs.active_tab() {
+                                    let state = tab.terminal.lock().unwrap();
+                                    let text = selection::extract_text_absolute(&state.grid, &sel);
+                                    drop(state);
+                                    if !text.is_empty() {
+                                        if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                            let _ = clipboard.set_text(text);
+                                        }
+                                    }
+                                }
+                            }
+                            copy_mode.exit(&mut sel);
+                            window.set_copy_mode(false);
+                        }
+                        kc::ESCAPE | kc::ANSI_Q => {
+                            copy_mode.exit(&mut sel);
+                            window.set_copy_mode(false);
+                        }
+                        _ => {}
+                    }
+                    render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range, pomodoro.is_input_blocked(), scrollbar_dragging || scrollbar_visible_until.map_or(false, |t| t > Instant::now()));
                     continue;
                 }
 

@@ -34,6 +34,7 @@ pub struct Ivars {
     current_event: RefCell<Option<Retained<NSEvent>>>,
     pending_resize: Cell<Option<(u32, u32)>>,
     last_mouse_pos: Cell<(f64, f64)>,
+    copy_mode_bypass_ime: Cell<bool>,
 }
 
 define_class! {
@@ -88,6 +89,12 @@ define_class! {
 
         #[unsafe(method(keyDown:))]
         fn key_down(&self, event: &NSEvent) {
+            // 복사모드: IME를 우회하고 raw keycode를 직접 전달
+            if self.ivars().copy_mode_bypass_ime.get() {
+                self.dispatch_key_event(event);
+                return;
+            }
+
             self.ivars().ime_state.set(ImeState::None);
             self.ivars().current_event.replace(Some(event.copy()));
 
@@ -360,6 +367,7 @@ impl TerminalView {
             current_event: RefCell::new(None),
             pending_resize: Cell::new(None),
             last_mouse_pos: Cell::new((0.0, 0.0)),
+            copy_mode_bypass_ime: Cell::new(false),
         });
         let this: Retained<Self> = unsafe { msg_send![super(this), init] };
         this.setWantsLayer(true);
@@ -393,6 +401,10 @@ impl TerminalView {
 
     pub(crate) fn set_sender(&self, sender: Sender<AppEvent>) {
         self.ivars().sender.replace(Some(sender));
+    }
+
+    pub(crate) fn set_copy_mode_bypass_ime(&self, enabled: bool) {
+        self.ivars().copy_mode_bypass_ime.set(enabled);
     }
 
     fn send_event(&self, event: AppEvent) {

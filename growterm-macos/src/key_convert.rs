@@ -35,6 +35,11 @@ pub mod keycode {
     pub const ANSI_7: u16 = 0x1A;
     pub const ANSI_8: u16 = 0x1C;
     pub const ANSI_9: u16 = 0x19;
+    pub const ANSI_H: u16 = 0x04;
+    pub const ANSI_J: u16 = 0x26;
+    pub const ANSI_K: u16 = 0x28;
+    pub const ANSI_L: u16 = 0x25;
+    pub const ANSI_Y: u16 = 0x10;
 }
 
 /// macOS keycode + characters → growterm_types::KeyEvent 변환
