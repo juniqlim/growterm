@@ -1,5 +1,5 @@
 /// macOS 윈도우에서 발생하는 이벤트
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum AppEvent {
     /// insertText: — 조합 완료 텍스트, PTY에 전송
     TextCommit(String),

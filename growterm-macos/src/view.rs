@@ -35,6 +35,8 @@ pub struct Ivars {
     pending_resize: Cell<Option<(u32, u32)>>,
     last_mouse_pos: Cell<(f64, f64)>,
     copy_mode_bypass_ime: Cell<bool>,
+    /// insertText:가 조합 중인 텍스트를 확정했는지 추적
+    ime_committed_from_composition: Cell<bool>,
 }
 
 define_class! {
@@ -96,6 +98,7 @@ define_class! {
             }
 
             self.ivars().ime_state.set(ImeState::None);
+            self.ivars().ime_committed_from_composition.set(false);
             self.ivars().current_event.replace(Some(event.copy()));
 
             // IME로 라우팅
@@ -108,8 +111,11 @@ define_class! {
                     // IME가 처리함 (insertText 또는 setMarkedText 호출됨)
                 }
                 ImeState::Continue | ImeState::None => {
-                    // IME가 패스하거나 아무 콜백도 호출 안 함
-                    self.dispatch_key_event(event);
+                    if self.ivars().ime_committed_from_composition.get() {
+                        self.defer_dispatch_key_event(event);
+                    } else {
+                        self.dispatch_key_event(event);
+                    }
                 }
             }
 
@@ -264,13 +270,16 @@ define_class! {
             self.ivars().ime_state.set(ImeState::Acted);
 
             let text = nsobj_to_string(string);
+            let was_composing;
             {
                 let mut marked = self.ivars().marked_text.borrow_mut();
-                if !marked.is_empty() {
+                was_composing = !marked.is_empty();
+                if was_composing {
                     marked.clear();
                     self.send_event(AppEvent::Preedit(String::new()));
                 }
             }
+            self.ivars().ime_committed_from_composition.set(was_composing);
             self.send_event(AppEvent::TextCommit(text));
         }
 
@@ -368,6 +377,7 @@ impl TerminalView {
             pending_resize: Cell::new(None),
             last_mouse_pos: Cell::new((0.0, 0.0)),
             copy_mode_bypass_ime: Cell::new(false),
+            ime_committed_from_composition: Cell::new(false),
         });
         let this: Retained<Self> = unsafe { msg_send![super(this), init] };
         this.setWantsLayer(true);
@@ -424,6 +434,28 @@ impl TerminalView {
             keycode,
             characters,
             modifiers,
+        });
+    }
+
+    /// 키 이벤트를 별도 스레드에서 전송 (IME 조합 확정 후 PTY에 시간차를 줌)
+    fn defer_dispatch_key_event(&self, event: &NSEvent) {
+        let keycode = event.keyCode();
+        let flags = event.modifierFlags();
+        let characters = event
+            .charactersIgnoringModifiers()
+            .map(|s| s.to_string());
+        let modifiers = convert_modifier_flags(flags);
+        let sender = self.ivars().sender.borrow().clone();
+        std::thread::spawn(move || {
+            // TextCommit이 PTY에 쓰이고 상대편이 읽을 시간 확보
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            if let Some(ref sender) = sender {
+                let _ = sender.send(AppEvent::KeyInput {
+                    keycode,
+                    characters,
+                    modifiers,
+                });
+            }
         });
     }
 
