@@ -23,7 +23,7 @@ pub struct Pomodoro {
     phase: Phase,
     started_at: Option<Instant>,
     /// Tab index → scrollback length at the moment Working phase started.
-    scrollback_snapshot: HashMap<usize, usize>,
+    scrollback_snapshot: HashMap<u64, usize>,
     /// AI coaching response lines, shared with the background thread.
     ai_response: Arc<Mutex<Option<Vec<String>>>>,
 }
@@ -59,17 +59,17 @@ impl Pomodoro {
     }
 
     /// Returns the scrollback snapshot (tab index → scrollback length at work start).
-    pub fn scrollback_snapshot(&self) -> &HashMap<usize, usize> {
+    pub fn scrollback_snapshot(&self) -> &HashMap<u64, usize> {
         &self.scrollback_snapshot
     }
 
     /// Called when user types. Starts work timer if idle.
     /// `tab_scrollback_lens` provides current scrollback length per tab index.
-    pub fn on_input(&mut self, tab_scrollback_lens: &[(usize, usize)]) {
+    pub fn on_input(&mut self, tab_scrollback_lens: &[(u64, usize)]) {
         self.on_input_at(Instant::now(), tab_scrollback_lens);
     }
 
-    fn on_input_at(&mut self, now: Instant, tab_scrollback_lens: &[(usize, usize)]) {
+    fn on_input_at(&mut self, now: Instant, tab_scrollback_lens: &[(u64, usize)]) {
         if !self.enabled {
             return;
         }

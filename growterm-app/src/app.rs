@@ -937,15 +937,14 @@ fn spawn_new_window() {
     }
 }
 
-/// Collect (tab_index, scrollback_len) for all tabs.
-fn tab_scrollback_lens(tabs: &TabManager) -> Vec<(usize, usize)> {
+/// Collect (tab_id, scrollback_len + screen_rows) for all tabs.
+fn tab_scrollback_lens(tabs: &TabManager) -> Vec<(u64, usize)> {
     tabs.tabs()
         .iter()
-        .enumerate()
-        .map(|(i, tab)| {
+        .map(|tab| {
             let state = tab.terminal.lock().unwrap();
-            let sb_len = state.grid.scrollback_len() + state.grid.cells().len();
-            (i, sb_len)
+            let total = state.grid.scrollback_len() + state.grid.cells().len();
+            (tab.id, total)
         })
         .collect()
 }
@@ -955,8 +954,11 @@ fn extract_pomodoro_tab_text(tabs: &TabManager, pomodoro: &Pomodoro) -> String {
     let snapshot = pomodoro.scrollback_snapshot();
     let mut result = String::new();
     for (i, tab) in tabs.tabs().iter().enumerate() {
+        let start_abs = match snapshot.get(&tab.id) {
+            Some(&v) => v,
+            None => continue, // tab created after pomodoro started
+        };
         let state = tab.terminal.lock().unwrap();
-        let start_abs = *snapshot.get(&i).unwrap_or(&0);
         let current_total = state.grid.scrollback_len() + state.grid.cells().len();
         if current_total <= start_abs {
             continue;

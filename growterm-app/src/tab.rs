@@ -13,6 +13,7 @@ use growterm_vt_parser::VtParser;
 use crate::response_timer::ResponseTimer;
 
 pub struct Tab {
+    pub id: u64,
     pub terminal: Arc<Mutex<TerminalState>>,
     pub pty_writer: PtyWriter,
     pub dirty: Arc<AtomicBool>,
@@ -32,6 +33,7 @@ pub struct TerminalState {
 pub struct TabManager {
     tabs: Vec<Tab>,
     active: usize,
+    next_id: u64,
 }
 
 /// Info passed to the renderer for drawing the tab bar.
@@ -45,10 +47,13 @@ impl TabManager {
         Self {
             tabs: Vec::new(),
             active: 0,
+            next_id: 0,
         }
     }
 
-    pub fn add_tab(&mut self, tab: Tab) {
+    pub fn add_tab(&mut self, mut tab: Tab) {
+        tab.id = self.next_id;
+        self.next_id += 1;
         let insert_at = if self.tabs.is_empty() {
             0
         } else {
@@ -237,6 +242,7 @@ impl Tab {
         };
 
         Ok(Tab {
+            id: 0, // assigned by TabManager::add_tab
             terminal,
             pty_writer,
             dirty,
@@ -850,6 +856,7 @@ mod tests {
         // Instead, create a stub by spawning a real PTY (acceptable for unit test).
         let (_, pty_writer) = growterm_pty::spawn(24, 80).unwrap();
         Tab {
+            id: 0, // assigned by TabManager::add_tab
             terminal,
             pty_writer,
             dirty,
