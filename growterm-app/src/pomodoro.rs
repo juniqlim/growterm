@@ -192,7 +192,8 @@ pub fn spawn_ai_coaching(
              집중도, 문제 해결 방식, 개선할 점 위주로 피드백하세요.\n\n\
              {tab_text}"
         );
-        let result = std::process::Command::new("claude")
+        let claude_path = find_claude_path();
+        let result = std::process::Command::new(&claude_path)
             .args(["-p", &prompt])
             .output();
         let lines = match result {
@@ -207,6 +208,15 @@ pub fn spawn_ai_coaching(
         save_coaching_file(&coaching_dir(), &lines);
         *ai_response.lock().unwrap() = Some(lines);
     });
+}
+
+fn find_claude_path() -> String {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let local_bin = format!("{home}/.local/bin/claude");
+    if std::path::Path::new(&local_bin).exists() {
+        return local_bin;
+    }
+    "claude".to_string()
 }
 
 fn coaching_dir() -> std::path::PathBuf {
@@ -473,5 +483,18 @@ mod tests {
         assert!(content.contains("커밋"));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn find_claude_path_returns_absolute_path_when_exists() {
+        let path = find_claude_path();
+        let home = std::env::var("HOME").unwrap();
+        let expected = format!("{home}/.local/bin/claude");
+        if std::path::Path::new(&expected).exists() {
+            assert_eq!(path, expected);
+            assert!(path.starts_with('/'), "should be absolute path, got: {path}");
+        } else {
+            assert_eq!(path, "claude");
+        }
     }
 }

@@ -876,6 +876,25 @@ impl GpuDrawer {
                 let total_height = lines.len() as f32 * tab_ch;
                 let start_y = (screen_h - total_height) / 2.0;
 
+                // Background box behind coaching text
+                let max_line_w = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0) as f32 * tab_cw;
+                let pad = tab_ch; // padding around text
+                let bg_x = ((screen_w - max_line_w) / 2.0 - pad).max(0.0);
+                let bg_y = (start_y - pad).max(0.0);
+                let bg_w = (max_line_w + pad * 2.0).min(screen_w);
+                let bg_h = (total_height + pad * 2.0).min(screen_h);
+                let mut coaching_bg_verts: Vec<BgVertex> = Vec::new();
+                push_bg_rect(&mut coaching_bg_verts, bg_x, bg_y, bg_w, bg_h, [0.0, 0.0, 0.0]);
+                let coaching_bg_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("coaching_bg_vb"),
+                    contents: bytemuck::cast_slice(&coaching_bg_verts),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+                pass.set_pipeline(&self.bg_pipeline);
+                pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+                pass.set_vertex_buffer(0, coaching_bg_buffer.slice(..));
+                pass.draw(0..coaching_bg_verts.len() as u32, 0..1);
+
                 let mut coaching_verts: Vec<GlyphVertex> = Vec::new();
                 for (line_idx, line) in lines.iter().enumerate() {
                     let text_w = line.chars().count() as f32 * tab_cw;
