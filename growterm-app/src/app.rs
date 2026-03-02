@@ -118,6 +118,12 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                 use growterm_macos::key_convert::keycode as kc;
 
                 if modifiers.contains(Modifiers::SUPER) {
+                    // Cmd+N: new window (spawn new process)
+                    if keycode == kc::ANSI_N {
+                        spawn_new_window();
+                        continue;
+                    }
+
                     // Cmd+T: new tab (inherit CWD from active tab)
                     if keycode == kc::ANSI_T {
                         let (cw, ch) = drawer.cell_size();
@@ -901,6 +907,23 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
     }
 }
 
+
+fn spawn_new_window() {
+    let Ok(exe) = std::env::current_exe() else { return };
+    let exe = exe.canonicalize().unwrap_or(exe);
+    let exe_str = exe.to_string_lossy();
+
+    if let Some(idx) = exe_str.find(".app/") {
+        // Inside .app bundle — use `open -n` to launch a new instance
+        let app_path = &exe_str[..idx + 4]; // include ".app"
+        let _ = std::process::Command::new("open")
+            .args(["-n", app_path])
+            .spawn();
+    } else {
+        // Dev environment — run binary directly
+        let _ = std::process::Command::new(exe).spawn();
+    }
+}
 
 fn build_title(pomodoro: &Pomodoro, tabs: &TabManager) -> String {
     use std::time::Duration;
