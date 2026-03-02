@@ -3,6 +3,18 @@ use unicode_width::UnicodeWidthChar;
 
 const MAX_SCROLLBACK: usize = 10_000;
 
+struct SavedScreen {
+    cells: Vec<Vec<Cell>>,
+    cursor_row: usize,
+    cursor_col: usize,
+    current_fg: Color,
+    current_bg: Color,
+    current_flags: CellFlags,
+    scrollback: Vec<Vec<Cell>>,
+    scroll_offset: usize,
+    cursor_visible: bool,
+}
+
 pub struct Grid {
     cells: Vec<Vec<Cell>>,
     cols: usize,
@@ -15,6 +27,9 @@ pub struct Grid {
     scrollback: Vec<Vec<Cell>>,
     scroll_offset: usize,
     cursor_visible: bool,
+    scroll_region_top: usize,
+    scroll_region_bottom: usize,
+    saved_screen: Option<SavedScreen>,
 }
 
 impl Grid {
@@ -33,6 +48,9 @@ impl Grid {
             scrollback: Vec::new(),
             scroll_offset: 0,
             cursor_visible: true,
+            scroll_region_top: 0,
+            scroll_region_bottom: rows,
+            saved_screen: None,
         }
     }
 
@@ -102,6 +120,23 @@ impl Grid {
             TerminalCommand::ShowCursor => self.cursor_visible = true,
             TerminalCommand::HideCursor => self.cursor_visible = false,
             TerminalCommand::DeleteChars(n) => self.delete_chars(*n),
+            TerminalCommand::InsertChars(n) => self.insert_chars(*n),
+            TerminalCommand::EraseChars(n) => self.erase_chars(*n),
+            TerminalCommand::InsertLines(n) => self.insert_lines(*n),
+            TerminalCommand::DeleteLines(n) => self.delete_lines(*n),
+            TerminalCommand::ScrollUp(n) => self.scroll_up_content(*n),
+            TerminalCommand::ScrollDown(n) => self.scroll_down_content(*n),
+            TerminalCommand::CursorColumn(col) => {
+                self.cursor_col = (*col as usize).saturating_sub(1).min(self.cols - 1);
+            }
+            TerminalCommand::CursorRow(row) => {
+                self.cursor_row = (*row as usize).saturating_sub(1).min(self.rows - 1);
+            }
+            TerminalCommand::SetScrollRegion { top, bottom } => {
+                self.set_scroll_region(*top, *bottom);
+            }
+            TerminalCommand::EnterAltScreen => self.enter_alt_screen(),
+            TerminalCommand::LeaveAltScreen => self.leave_alt_screen(),
             TerminalCommand::EraseInLine(mode) => self.erase_in_line(*mode),
             TerminalCommand::EraseInDisplay(mode) => self.erase_in_display(*mode),
         }
@@ -122,6 +157,9 @@ impl Grid {
         self.rows = new_rows;
         self.cursor_row = self.cursor_row.min(self.rows - 1);
         self.cursor_col = self.cursor_col.min(self.cols - 1);
+        // Reset scroll region on resize
+        self.scroll_region_top = 0;
+        self.scroll_region_bottom = self.rows;
     }
 
     fn print(&mut self, c: char) {
@@ -186,9 +224,10 @@ impl Grid {
     }
 
     fn newline(&mut self) {
-        if self.cursor_row + 1 >= self.rows {
-            self.scroll_up();
-        } else {
+        let bottom = self.scroll_region_bottom - 1; // 0-indexed
+        if self.cursor_row == bottom {
+            self.scroll_region_up(1);
+        } else if self.cursor_row + 1 < self.rows {
             self.cursor_row += 1;
         }
     }
@@ -198,13 +237,141 @@ impl Grid {
         self.scrollback.push(row);
         if self.scrollback.len() > MAX_SCROLLBACK {
             self.scrollback.remove(0);
-            // If trimmed and user is scrolled, offset may exceed scrollback
             self.scroll_offset = self.scroll_offset.min(self.scrollback.len());
         }
         self.cells.push(vec![Cell::default(); self.cols]);
         if self.scroll_offset > 0 {
             self.scroll_offset += 1;
             self.scroll_offset = self.scroll_offset.min(self.scrollback.len());
+        }
+    }
+
+    fn scroll_region_up(&mut self, n: u16) {
+        let top = self.scroll_region_top;
+        let bottom = self.scroll_region_bottom; // exclusive
+        if top == 0 && bottom == self.rows {
+            // Full screen scroll - use scrollback
+            for _ in 0..n {
+                self.scroll_up();
+            }
+            return;
+        }
+        let n = (n as usize).min(bottom - top);
+        let blank = vec![Cell::default(); self.cols];
+        for _ in 0..n {
+            self.cells.remove(top);
+            self.cells.insert(bottom - 1, blank.clone());
+        }
+    }
+
+    fn scroll_region_down(&mut self, n: u16) {
+        let top = self.scroll_region_top;
+        let bottom = self.scroll_region_bottom; // exclusive
+        let n = (n as usize).min(bottom - top);
+        let blank = vec![Cell::default(); self.cols];
+        for _ in 0..n {
+            self.cells.remove(bottom - 1);
+            self.cells.insert(top, blank.clone());
+        }
+    }
+
+    fn set_scroll_region(&mut self, top: u16, bottom: u16) {
+        if top == 0 && bottom == 0 {
+            // Reset to full screen
+            self.scroll_region_top = 0;
+            self.scroll_region_bottom = self.rows;
+        } else {
+            self.scroll_region_top = (top as usize).saturating_sub(1);
+            self.scroll_region_bottom = (bottom as usize).min(self.rows);
+        }
+    }
+
+    fn enter_alt_screen(&mut self) {
+        self.saved_screen = Some(SavedScreen {
+            cells: self.cells.clone(),
+            cursor_row: self.cursor_row,
+            cursor_col: self.cursor_col,
+            current_fg: self.current_fg,
+            current_bg: self.current_bg,
+            current_flags: self.current_flags,
+            scrollback: std::mem::take(&mut self.scrollback),
+            scroll_offset: self.scroll_offset,
+            cursor_visible: self.cursor_visible,
+        });
+        self.cells = vec![vec![Cell::default(); self.cols]; self.rows];
+        self.cursor_row = 0;
+        self.cursor_col = 0;
+        self.scroll_offset = 0;
+    }
+
+    fn leave_alt_screen(&mut self) {
+        if let Some(saved) = self.saved_screen.take() {
+            self.cells = saved.cells;
+            self.cursor_row = saved.cursor_row;
+            self.cursor_col = saved.cursor_col;
+            self.current_fg = saved.current_fg;
+            self.current_bg = saved.current_bg;
+            self.current_flags = saved.current_flags;
+            self.scrollback = saved.scrollback;
+            self.scroll_offset = saved.scroll_offset;
+            self.cursor_visible = saved.cursor_visible;
+        }
+    }
+
+    fn insert_lines(&mut self, n: u16) {
+        let n = n as usize;
+        let bottom = self.scroll_region_bottom;
+        let row = self.cursor_row;
+        let blank = vec![Cell::default(); self.cols];
+        for _ in 0..n.min(bottom - row) {
+            if bottom <= self.cells.len() {
+                self.cells.remove(bottom - 1);
+            }
+            self.cells.insert(row, blank.clone());
+        }
+    }
+
+    fn delete_lines(&mut self, n: u16) {
+        let n = n as usize;
+        let bottom = self.scroll_region_bottom;
+        let row = self.cursor_row;
+        let blank = vec![Cell::default(); self.cols];
+        for _ in 0..n.min(bottom - row) {
+            self.cells.remove(row);
+            self.cells.insert(bottom - 1, blank.clone());
+        }
+    }
+
+    fn scroll_up_content(&mut self, n: u16) {
+        self.scroll_region_up(n);
+    }
+
+    fn scroll_down_content(&mut self, n: u16) {
+        self.scroll_region_down(n);
+    }
+
+    fn insert_chars(&mut self, n: u16) {
+        let n = n as usize;
+        let row = self.cursor_row;
+        let col = self.cursor_col;
+        let blank = self.blank_cell();
+        // Shift right from end
+        for i in (col..self.cols).rev() {
+            if i >= col + n {
+                self.cells[row][i] = self.cells[row][i - n];
+            } else {
+                self.cells[row][i] = blank;
+            }
+        }
+    }
+
+    fn erase_chars(&mut self, n: u16) {
+        let n = n as usize;
+        let row = self.cursor_row;
+        let col = self.cursor_col;
+        let blank = self.blank_cell();
+        for i in col..(col + n).min(self.cols) {
+            self.cells[row][i] = blank;
         }
     }
 

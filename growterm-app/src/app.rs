@@ -389,6 +389,25 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                         }
                         _ => {}
                     }
+
+                    // 커서 행이 화면에 보이도록 스크롤 조정
+                    if let Some(tab) = tabs.active_tab() {
+                        let mut state = tab.terminal.lock().unwrap();
+                        let sb_len = state.grid.scrollback_len();
+                        let visible_rows = state.grid.cells().len();
+                        let offset = state.grid.scroll_offset();
+                        let view_top = sb_len.saturating_sub(offset) as u32;
+                        let view_bottom = view_top + visible_rows as u32;
+                        let cursor_row = copy_mode.cursor.0;
+                        if cursor_row < view_top {
+                            let new_offset = sb_len.saturating_sub(cursor_row as usize);
+                            state.grid.set_scroll_offset(new_offset);
+                        } else if cursor_row >= view_bottom {
+                            let new_offset = sb_len.saturating_sub(cursor_row as usize + 1 - visible_rows);
+                            state.grid.set_scroll_offset(new_offset);
+                        }
+                    }
+
                     render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &ink_state, hover_url_range, pomodoro.is_input_blocked(), scrollbar_dragging || scrollbar_visible_until.map_or(false, |t| t > Instant::now()));
                     continue;
                 }

@@ -166,9 +166,11 @@ impl vte::Perform for Handler {
 
         // Private mode sequences (CSI ? ... h/l)
         if intermediates == [b'?'] {
-            match action {
-                'h' if first == 25 => self.commands.push(TerminalCommand::ShowCursor),
-                'l' if first == 25 => self.commands.push(TerminalCommand::HideCursor),
+            match (action, first) {
+                ('h', 25) => self.commands.push(TerminalCommand::ShowCursor),
+                ('l', 25) => self.commands.push(TerminalCommand::HideCursor),
+                ('h', 1049) => self.commands.push(TerminalCommand::EnterAltScreen),
+                ('l', 1049) => self.commands.push(TerminalCommand::LeaveAltScreen),
                 _ => {}
             }
             return;
@@ -197,6 +199,37 @@ impl vte::Perform for Handler {
             'P' => self
                 .commands
                 .push(TerminalCommand::DeleteChars(first.max(1))),
+            '@' => self
+                .commands
+                .push(TerminalCommand::InsertChars(first.max(1))),
+            'X' => self
+                .commands
+                .push(TerminalCommand::EraseChars(first.max(1))),
+            'L' => self
+                .commands
+                .push(TerminalCommand::InsertLines(first.max(1))),
+            'M' => self
+                .commands
+                .push(TerminalCommand::DeleteLines(first.max(1))),
+            'S' => self
+                .commands
+                .push(TerminalCommand::ScrollUp(first.max(1))),
+            'T' => self
+                .commands
+                .push(TerminalCommand::ScrollDown(first.max(1))),
+            'G' => self
+                .commands
+                .push(TerminalCommand::CursorColumn(first.max(1))),
+            'd' => self
+                .commands
+                .push(TerminalCommand::CursorRow(first.max(1))),
+            'r' => {
+                let mut p = params.iter();
+                let top = p.next().map(|v| v[0]).unwrap_or(0);
+                let bottom = p.next().map(|v| v[0]).unwrap_or(0);
+                self.commands
+                    .push(TerminalCommand::SetScrollRegion { top, bottom });
+            }
             'm' => self.handle_sgr(params),
             _ => {} // ignore unknown CSI
         }
@@ -701,6 +734,129 @@ mod tests {
         let mut parser = VtParser::new();
         let cmds = parser.parse(b"\x1b[?25h");
         assert_eq!(cmds, vec![TerminalCommand::ShowCursor]);
+    }
+
+    // --- Alternate Screen Buffer ---
+
+    #[test]
+    fn parse_enter_alt_screen() {
+        let mut parser = VtParser::new();
+        let cmds = parser.parse(b"\x1b[?1049h");
+        assert_eq!(cmds, vec![TerminalCommand::EnterAltScreen]);
+    }
+
+    #[test]
+    fn parse_leave_alt_screen() {
+        let mut parser = VtParser::new();
+        let cmds = parser.parse(b"\x1b[?1049l");
+        assert_eq!(cmds, vec![TerminalCommand::LeaveAltScreen]);
+    }
+
+    // --- Scroll Region (DECSTBM) ---
+
+    #[test]
+    fn parse_set_scroll_region() {
+        let mut parser = VtParser::new();
+        let cmds = parser.parse(b"\x1b[5;20r");
+        assert_eq!(
+            cmds,
+            vec![TerminalCommand::SetScrollRegion { top: 5, bottom: 20 }]
+        );
+    }
+
+    #[test]
+    fn parse_reset_scroll_region() {
+        let mut parser = VtParser::new();
+        let cmds = parser.parse(b"\x1b[r");
+        assert_eq!(
+            cmds,
+            vec![TerminalCommand::SetScrollRegion { top: 0, bottom: 0 }]
+        );
+    }
+
+    // --- Insert/Delete Lines ---
+
+    #[test]
+    fn parse_insert_lines() {
+        let mut parser = VtParser::new();
+        let cmds = parser.parse(b"\x1b[3L");
+        assert_eq!(cmds, vec![TerminalCommand::InsertLines(3)]);
+    }
+
+    #[test]
+    fn parse_insert_lines_default() {
+        let mut parser = VtParser::new();
+        let cmds = parser.parse(b"\x1b[L");
+        assert_eq!(cmds, vec![TerminalCommand::InsertLines(1)]);
+    }
+
+    #[test]
+    fn parse_delete_lines() {
+        let mut parser = VtParser::new();
+        let cmds = parser.parse(b"\x1b[2M");
+        assert_eq!(cmds, vec![TerminalCommand::DeleteLines(2)]);
+    }
+
+    #[test]
+    fn parse_delete_lines_default() {
+        let mut parser = VtParser::new();
+        let cmds = parser.parse(b"\x1b[M");
+        assert_eq!(cmds, vec![TerminalCommand::DeleteLines(1)]);
+    }
+
+    // --- Scroll Up/Down ---
+
+    #[test]
+    fn parse_scroll_up() {
+        let mut parser = VtParser::new();
+        let cmds = parser.parse(b"\x1b[2S");
+        assert_eq!(cmds, vec![TerminalCommand::ScrollUp(2)]);
+    }
+
+    #[test]
+    fn parse_scroll_down() {
+        let mut parser = VtParser::new();
+        let cmds = parser.parse(b"\x1b[3T");
+        assert_eq!(cmds, vec![TerminalCommand::ScrollDown(3)]);
+    }
+
+    // --- Cursor Column (CHA) / Cursor Row (VPA) ---
+
+    #[test]
+    fn parse_cursor_column() {
+        let mut parser = VtParser::new();
+        let cmds = parser.parse(b"\x1b[10G");
+        assert_eq!(cmds, vec![TerminalCommand::CursorColumn(10)]);
+    }
+
+    #[test]
+    fn parse_cursor_column_default() {
+        let mut parser = VtParser::new();
+        let cmds = parser.parse(b"\x1b[G");
+        assert_eq!(cmds, vec![TerminalCommand::CursorColumn(1)]);
+    }
+
+    #[test]
+    fn parse_cursor_row() {
+        let mut parser = VtParser::new();
+        let cmds = parser.parse(b"\x1b[5d");
+        assert_eq!(cmds, vec![TerminalCommand::CursorRow(5)]);
+    }
+
+    // --- Insert/Erase Characters ---
+
+    #[test]
+    fn parse_insert_chars() {
+        let mut parser = VtParser::new();
+        let cmds = parser.parse(b"\x1b[3@");
+        assert_eq!(cmds, vec![TerminalCommand::InsertChars(3)]);
+    }
+
+    #[test]
+    fn parse_erase_chars() {
+        let mut parser = VtParser::new();
+        let cmds = parser.parse(b"\x1b[4X");
+        assert_eq!(cmds, vec![TerminalCommand::EraseChars(4)]);
     }
 
     // --- Mixed content ---

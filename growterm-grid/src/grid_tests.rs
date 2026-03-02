@@ -883,3 +883,225 @@ fn hide_cursor_then_show_cursor() {
     grid.apply(&TerminalCommand::ShowCursor);
     assert!(grid.cursor_visible());
 }
+
+// === Alternate Screen Buffer ===
+
+#[test]
+fn enter_alt_screen_clears_and_saves() {
+    let mut grid = Grid::new(5, 3);
+    grid.apply(&TerminalCommand::Print('A'));
+    grid.apply(&TerminalCommand::EnterAltScreen);
+    // Screen should be cleared
+    assert_eq!(grid.cells()[0][0].character, ' ');
+    // Cursor should be at 0,0
+    assert_eq!(grid.cursor_pos(), (0, 0));
+}
+
+#[test]
+fn leave_alt_screen_restores() {
+    let mut grid = Grid::new(5, 3);
+    grid.apply(&TerminalCommand::Print('A'));
+    grid.apply(&TerminalCommand::CursorPosition { row: 2, col: 3 });
+    grid.apply(&TerminalCommand::EnterAltScreen);
+    grid.apply(&TerminalCommand::Print('X'));
+    grid.apply(&TerminalCommand::LeaveAltScreen);
+    // Original content should be restored
+    assert_eq!(grid.cells()[0][0].character, 'A');
+    // Cursor should be restored
+    assert_eq!(grid.cursor_pos(), (1, 2));
+}
+
+#[test]
+fn alt_screen_does_not_affect_scrollback() {
+    let mut grid = Grid::new(5, 2);
+    // Push to scrollback
+    for c in "AAAAA".chars() {
+        grid.apply(&TerminalCommand::Print(c));
+    }
+    grid.apply(&TerminalCommand::CarriageReturn);
+    grid.apply(&TerminalCommand::Newline);
+    for c in "BBBBB".chars() {
+        grid.apply(&TerminalCommand::Print(c));
+    }
+    grid.apply(&TerminalCommand::CarriageReturn);
+    grid.apply(&TerminalCommand::Newline);
+    let sb_len = grid.scrollback_len();
+    grid.apply(&TerminalCommand::EnterAltScreen);
+    grid.apply(&TerminalCommand::LeaveAltScreen);
+    assert_eq!(grid.scrollback_len(), sb_len);
+}
+
+// === Cursor Column (CHA) / Cursor Row (VPA) ===
+
+#[test]
+fn cursor_column_moves_to_column() {
+    let mut grid = Grid::new(80, 24);
+    grid.apply(&TerminalCommand::CursorPosition { row: 3, col: 5 });
+    grid.apply(&TerminalCommand::CursorColumn(10));
+    grid.apply(&TerminalCommand::Print('X'));
+    // Row should stay at 2 (0-indexed), col should be 9 (10-1)
+    assert_eq!(grid.cells()[2][9].character, 'X');
+}
+
+#[test]
+fn cursor_row_moves_to_row() {
+    let mut grid = Grid::new(80, 24);
+    grid.apply(&TerminalCommand::CursorPosition { row: 1, col: 5 });
+    grid.apply(&TerminalCommand::CursorRow(10));
+    grid.apply(&TerminalCommand::Print('Y'));
+    // Row should be 9 (10-1), col should stay at 4
+    assert_eq!(grid.cells()[9][4].character, 'Y');
+}
+
+// === Insert/Delete Lines ===
+
+#[test]
+fn insert_lines_pushes_down() {
+    let mut grid = Grid::new(5, 4);
+    // Row 0: AAAAA, Row 1: BBBBB, Row 2: CCCCC, Row 3: DDDDD
+    for (r, ch) in ['A', 'B', 'C', 'D'].iter().enumerate() {
+        grid.apply(&TerminalCommand::CursorPosition { row: r as u16 + 1, col: 1 });
+        for _ in 0..5 {
+            grid.apply(&TerminalCommand::Print(*ch));
+        }
+    }
+    // Cursor at row 1, insert 1 line
+    grid.apply(&TerminalCommand::CursorPosition { row: 2, col: 1 });
+    grid.apply(&TerminalCommand::InsertLines(1));
+    // Row 1 should be blank, BBBBB moves to row 2, CCCCC to row 3, DDDDD lost
+    assert_eq!(grid.cells()[0][0].character, 'A');
+    assert_eq!(grid.cells()[1][0].character, ' ');
+    assert_eq!(grid.cells()[2][0].character, 'B');
+    assert_eq!(grid.cells()[3][0].character, 'C');
+}
+
+#[test]
+fn delete_lines_pulls_up() {
+    let mut grid = Grid::new(5, 4);
+    for (r, ch) in ['A', 'B', 'C', 'D'].iter().enumerate() {
+        grid.apply(&TerminalCommand::CursorPosition { row: r as u16 + 1, col: 1 });
+        for _ in 0..5 {
+            grid.apply(&TerminalCommand::Print(*ch));
+        }
+    }
+    // Cursor at row 1, delete 1 line
+    grid.apply(&TerminalCommand::CursorPosition { row: 2, col: 1 });
+    grid.apply(&TerminalCommand::DeleteLines(1));
+    // BBBBB removed, CCCCC→row1, DDDDD→row2, row3 blank
+    assert_eq!(grid.cells()[0][0].character, 'A');
+    assert_eq!(grid.cells()[1][0].character, 'C');
+    assert_eq!(grid.cells()[2][0].character, 'D');
+    assert_eq!(grid.cells()[3][0].character, ' ');
+}
+
+// === Scroll Up/Down (content) ===
+
+#[test]
+fn scroll_up_content() {
+    let mut grid = Grid::new(5, 3);
+    for (r, ch) in ['A', 'B', 'C'].iter().enumerate() {
+        grid.apply(&TerminalCommand::CursorPosition { row: r as u16 + 1, col: 1 });
+        for _ in 0..5 {
+            grid.apply(&TerminalCommand::Print(*ch));
+        }
+    }
+    grid.apply(&TerminalCommand::ScrollUp(1));
+    // Row 0 = B, Row 1 = C, Row 2 = blank
+    assert_eq!(grid.cells()[0][0].character, 'B');
+    assert_eq!(grid.cells()[1][0].character, 'C');
+    assert_eq!(grid.cells()[2][0].character, ' ');
+}
+
+#[test]
+fn scroll_down_content() {
+    let mut grid = Grid::new(5, 3);
+    for (r, ch) in ['A', 'B', 'C'].iter().enumerate() {
+        grid.apply(&TerminalCommand::CursorPosition { row: r as u16 + 1, col: 1 });
+        for _ in 0..5 {
+            grid.apply(&TerminalCommand::Print(*ch));
+        }
+    }
+    grid.apply(&TerminalCommand::ScrollDown(1));
+    // Row 0 = blank, Row 1 = A, Row 2 = B
+    assert_eq!(grid.cells()[0][0].character, ' ');
+    assert_eq!(grid.cells()[1][0].character, 'A');
+    assert_eq!(grid.cells()[2][0].character, 'B');
+}
+
+// === Insert/Erase Characters ===
+
+#[test]
+fn insert_chars_shifts_right() {
+    let mut grid = Grid::new(10, 1);
+    for c in "ABCDE".chars() {
+        grid.apply(&TerminalCommand::Print(c));
+    }
+    grid.apply(&TerminalCommand::CursorPosition { row: 1, col: 2 }); // col 1
+    grid.apply(&TerminalCommand::InsertChars(2));
+    // A, blank, blank, B, C, D, E, ...
+    assert_eq!(grid.cells()[0][0].character, 'A');
+    assert_eq!(grid.cells()[0][1].character, ' ');
+    assert_eq!(grid.cells()[0][2].character, ' ');
+    assert_eq!(grid.cells()[0][3].character, 'B');
+    assert_eq!(grid.cells()[0][4].character, 'C');
+}
+
+#[test]
+fn erase_chars_blanks_at_cursor() {
+    let mut grid = Grid::new(10, 1);
+    for c in "ABCDE".chars() {
+        grid.apply(&TerminalCommand::Print(c));
+    }
+    grid.apply(&TerminalCommand::CursorPosition { row: 1, col: 2 }); // col 1
+    grid.apply(&TerminalCommand::EraseChars(2));
+    // A, blank, blank, D, E
+    assert_eq!(grid.cells()[0][0].character, 'A');
+    assert_eq!(grid.cells()[0][1].character, ' ');
+    assert_eq!(grid.cells()[0][2].character, ' ');
+    assert_eq!(grid.cells()[0][3].character, 'D');
+    assert_eq!(grid.cells()[0][4].character, 'E');
+}
+
+// === Scroll Region ===
+
+#[test]
+fn set_scroll_region_limits_scroll() {
+    let mut grid = Grid::new(5, 5);
+    for (r, ch) in ['A', 'B', 'C', 'D', 'E'].iter().enumerate() {
+        grid.apply(&TerminalCommand::CursorPosition { row: r as u16 + 1, col: 1 });
+        for _ in 0..5 {
+            grid.apply(&TerminalCommand::Print(*ch));
+        }
+    }
+    // Set scroll region to rows 2-4 (1-indexed)
+    grid.apply(&TerminalCommand::SetScrollRegion { top: 2, bottom: 4 });
+    // Cursor at bottom of region, newline should scroll within region
+    grid.apply(&TerminalCommand::CursorPosition { row: 4, col: 1 });
+    grid.apply(&TerminalCommand::Newline);
+    // Row 0 (A) untouched, Row 1 = C, Row 2 = D, Row 3 = blank, Row 4 (E) untouched
+    assert_eq!(grid.cells()[0][0].character, 'A');
+    assert_eq!(grid.cells()[1][0].character, 'C');
+    assert_eq!(grid.cells()[2][0].character, 'D');
+    assert_eq!(grid.cells()[3][0].character, ' ');
+    assert_eq!(grid.cells()[4][0].character, 'E');
+}
+
+#[test]
+fn reset_scroll_region_restores_full_screen() {
+    let mut grid = Grid::new(5, 3);
+    grid.apply(&TerminalCommand::SetScrollRegion { top: 1, bottom: 2 });
+    grid.apply(&TerminalCommand::SetScrollRegion { top: 0, bottom: 0 });
+    // After reset, newline at bottom should scroll full screen
+    for (r, ch) in ['A', 'B', 'C'].iter().enumerate() {
+        grid.apply(&TerminalCommand::CursorPosition { row: r as u16 + 1, col: 1 });
+        for _ in 0..5 {
+            grid.apply(&TerminalCommand::Print(*ch));
+        }
+    }
+    grid.apply(&TerminalCommand::CursorPosition { row: 3, col: 1 });
+    grid.apply(&TerminalCommand::Newline);
+    // Full screen scroll: B, C, blank
+    assert_eq!(grid.cells()[0][0].character, 'B');
+    assert_eq!(grid.cells()[1][0].character, 'C');
+    assert_eq!(grid.cells()[2][0].character, ' ');
+}
