@@ -445,6 +445,7 @@ impl GpuDrawer {
         transparent_tab_bar: bool,
         screen_full: bool,
         title_bar_height: f32,
+        header_opacity: f32,
     ) {
         if self.surface_dirty {
             self.surface_dirty = false;
@@ -737,7 +738,7 @@ impl GpuDrawer {
         // Title bar overlay when no tabs
         if tab_bar.is_none() && transparent_tab_bar && title_bar_height > 0.0 {
             let screen_w = self.surface_config.width as f32;
-            push_bg_rect(&mut tab_bg_verts, 0.0, 0.0, screen_w, title_bar_height, [0.0, 0.0, 0.0, 0.8]);
+            push_bg_rect(&mut tab_bg_verts, 0.0, 0.0, screen_w, title_bar_height, [0.0, 0.0, 0.0, header_opacity]);
         }
         if let Some(tab_info) = tab_bar {
             let (tab_cw, tab_ch) = self.tab_atlas.cell_size();
@@ -746,7 +747,7 @@ impl GpuDrawer {
             let screen_w = self.surface_config.width as f32;
             let tab_y = if transparent_tab_bar { title_bar_height } else { 0.0 };
             let bar_bg: [f32; 4] = if transparent_tab_bar {
-                [0.0, 0.0, 0.0, 0.8]
+                [0.0, 0.0, 0.0, header_opacity]
             } else {
                 [0.0, 0.0, 0.0, 1.0]
             };

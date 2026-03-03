@@ -15,6 +15,8 @@ pub struct Config {
     pub coaching: bool,
     #[serde(default)]
     pub transparent_tab_bar: bool,
+    #[serde(default = "default_header_opacity")]
+    pub header_opacity: f32,
 }
 
 fn default_font_family() -> String {
@@ -23,6 +25,10 @@ fn default_font_family() -> String {
 
 fn default_font_size() -> f32 {
     32.0
+}
+
+fn default_header_opacity() -> f32 {
+    0.8
 }
 
 fn default_true() -> bool {
@@ -38,6 +44,7 @@ impl Default for Config {
             response_timer: false,
             coaching: true,
             transparent_tab_bar: false,
+            header_opacity: default_header_opacity(),
         }
     }
 }
@@ -102,6 +109,7 @@ impl Config {
             response_timer: read_bool("response_timer_enabled", false),
             coaching: read_bool("coaching_enabled", true),
             transparent_tab_bar: read_bool("transparent_tab_bar", false),
+            header_opacity: default_header_opacity(),
         }
     }
 
@@ -109,8 +117,8 @@ impl Config {
         let dir = config_dir();
         let _ = std::fs::create_dir_all(&dir);
         let content = format!(
-            "font_family = {:?}\nfont_size = {}\npomodoro = {}\nresponse_timer = {}\ncoaching = {}\ntransparent_tab_bar = {}\n",
-            self.font_family, self.font_size, self.pomodoro, self.response_timer, self.coaching, self.transparent_tab_bar,
+            "font_family = {:?}\nfont_size = {}\npomodoro = {}\nresponse_timer = {}\ncoaching = {}\ntransparent_tab_bar = {}\nheader_opacity = {}\n",
+            self.font_family, self.font_size, self.pomodoro, self.response_timer, self.coaching, self.transparent_tab_bar, self.header_opacity,
         );
         let _ = std::fs::write(config_path(), content);
     }
@@ -129,6 +137,7 @@ pomodoro = true
 response_timer = false
 coaching = false
 transparent_tab_bar = true
+header_opacity = 0.5
 "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(config.font_family, "Menlo");
@@ -137,6 +146,7 @@ transparent_tab_bar = true
         assert!(!config.response_timer);
         assert!(!config.coaching);
         assert!(config.transparent_tab_bar);
+        assert_eq!(config.header_opacity, 0.5);
     }
 
     #[test]
@@ -164,6 +174,7 @@ transparent_tab_bar = true
         assert!(!config.response_timer);
         assert!(config.coaching);
         assert!(!config.transparent_tab_bar);
+        assert_eq!(config.header_opacity, 0.8);
     }
 
     #[test]
