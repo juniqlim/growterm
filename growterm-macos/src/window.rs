@@ -4,7 +4,7 @@ use std::sync::mpsc::Sender;
 
 use objc2::rc::Retained;
 use objc2::MainThreadMarker;
-use objc2_app_kit::{NSBackingStoreType, NSWindow, NSWindowStyleMask};
+use objc2_app_kit::{NSBackingStoreType, NSColor, NSWindow, NSWindowStyleMask};
 use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 
 extern "C" {
@@ -68,6 +68,8 @@ impl MacWindow {
 
         let view = TerminalView::new(mtm);
 
+        ns_window.setTitlebarAppearsTransparent(true);
+        ns_window.setBackgroundColor(Some(&NSColor::blackColor()));
         ns_window.setTabbingMode(objc2_app_kit::NSWindowTabbingMode::Disallowed);
         ns_window.setContentView(Some(&view));
         ns_window.makeFirstResponder(Some(&view));

@@ -721,8 +721,8 @@ impl GpuDrawer {
             let tab_ascent = self.tab_atlas.ascent();
             let bar_h = self.tab_bar_height();
             let screen_w = self.surface_config.width as f32;
-            let bar_bg: [f32; 3] = [0.15, 0.15, 0.15];
-            let active_bg: [f32; 3] = [0.3, 0.3, 0.3];
+            let bar_bg: [f32; 3] = [0.0, 0.0, 0.0];
+            let active_bg: [f32; 3] = [0.0, 0.0, 0.0];
             let dragging_bg: [f32; 3] = [0.4, 0.4, 0.2];
 
             push_rect(&mut bg_vertices, 0.0, 0.0, screen_w, bar_h, bar_bg);
@@ -754,7 +754,7 @@ impl GpuDrawer {
                         let color: [f32; 3] = if i == tab_info.active_index {
                             [1.0, 1.0, 1.0]
                         } else {
-                            [0.6, 0.6, 0.6]
+                            [0.4, 0.4, 0.4]
                         };
                         glyph_vertices.push(GlyphVertex {
                             position: [gx, gy],
