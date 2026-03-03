@@ -69,6 +69,7 @@ const TAB_BAR_PADDING: f32 = 8.0;
 pub struct TabBarInfo {
     pub titles: Vec<String>,
     pub active_index: usize,
+    pub dragging_index: Option<usize>,
 }
 
 impl GpuDrawer {
@@ -722,6 +723,7 @@ impl GpuDrawer {
             let screen_w = self.surface_config.width as f32;
             let bar_bg: [f32; 3] = [0.15, 0.15, 0.15];
             let active_bg: [f32; 3] = [0.3, 0.3, 0.3];
+            let dragging_bg: [f32; 3] = [0.4, 0.4, 0.2];
 
             push_rect(&mut bg_vertices, 0.0, 0.0, screen_w, bar_h, bar_bg);
 
@@ -729,7 +731,9 @@ impl GpuDrawer {
             let tab_w = screen_w / tab_count;
             let mut x = 0.0_f32;
             for (i, title) in tab_info.titles.iter().enumerate() {
-                if i == tab_info.active_index {
+                if tab_info.dragging_index == Some(i) {
+                    push_rect(&mut bg_vertices, x, 0.0, tab_w, bar_h, dragging_bg);
+                } else if i == tab_info.active_index {
                     push_rect(&mut bg_vertices, x, 0.0, tab_w, bar_h, active_bg);
                 }
 

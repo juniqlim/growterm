@@ -132,7 +132,7 @@ pub fn extract_text(cells: &[Vec<Cell>], selection: &Selection) -> String {
 /// Extract the input line text, using Ink prompt detection if available,
 /// falling back to the cursor line.
 /// Returns (text, prompt_row) where prompt_row is the screen row for flash.
-pub fn input_line_text(grid: &growterm_grid::Grid) -> (String, u16) {
+pub fn input_line_text(grid: &growterm_grid::Grid) -> (String, u16, u16) {
     let cells = grid.cells();
     if let Some(prompt_row) = crate::ink_workaround::find_prompt_row(cells) {
         let bottom = crate::ink_workaround::find_input_bottom(cells, prompt_row);
@@ -178,10 +178,10 @@ pub fn input_line_text(grid: &growterm_grid::Grid) -> (String, u16) {
         } else {
             result
         };
-        return (result, prompt_row as u16);
+        return (result, prompt_row as u16, bottom as u16);
     }
     let row = grid.cursor_pos().0;
-    (cursor_line_text(grid), row)
+    (cursor_line_text(grid), row, row)
 }
 
 /// Extract the text of the cursor line from the grid (trailing whitespace trimmed).
@@ -478,9 +478,10 @@ mod tests {
         // Cursor elsewhere (like Claude Code does)
         grid.apply(&TerminalCommand::CursorPosition { row: 5, col: 1 });
 
-        let (text, flash_row) = input_line_text(&grid);
+        let (text, flash_start, flash_end) = input_line_text(&grid);
         assert_eq!(text, "hello");
-        assert_eq!(flash_row, 1); // prompt is on row 1
+        assert_eq!(flash_start, 1); // prompt is on row 1
+        assert_eq!(flash_end, 1); // single line input
     }
 
     #[test]
@@ -493,9 +494,10 @@ mod tests {
         for c in "$ ls -la".chars() {
             grid.apply(&TerminalCommand::Print(c));
         }
-        let (text, flash_row) = input_line_text(&grid);
+        let (text, flash_start, flash_end) = input_line_text(&grid);
         assert_eq!(text, "$ ls -la");
-        assert_eq!(flash_row, 0); // cursor is on row 0
+        assert_eq!(flash_start, 0); // cursor is on row 0
+        assert_eq!(flash_end, 0); // single line
     }
 
     #[test]

@@ -157,6 +157,27 @@ impl TabManager {
         }
     }
 
+    pub fn move_tab(&mut self, from: usize, to: usize) {
+        if from >= self.tabs.len() || to >= self.tabs.len() || from == to {
+            return;
+        }
+        let tab = self.tabs.remove(from);
+        self.tabs.insert(to, tab);
+        if self.active == from {
+            self.active = to;
+        } else if from < to {
+            // moved right: indices [from+1..=to] shifted left by 1
+            if self.active > from && self.active <= to {
+                self.active -= 1;
+            }
+        } else {
+            // moved left: indices [to..from-1] shifted right by 1
+            if self.active >= to && self.active < from {
+                self.active += 1;
+            }
+        }
+    }
+
     /// Returns the tab index at pixel x, given the screen width.
     /// Returns `None` if the tab bar is not shown or x is out of range.
     pub fn tab_index_at_x(&self, x: f32, screen_w: f32) -> Option<usize> {
@@ -1183,6 +1204,79 @@ mod tests {
         mgr.add_tab(dummy_tab());
         assert!(mgr.show_tab_bar());
         assert_eq!(mgr.mouse_y_offset(30.0), 30.0);
+    }
+
+    #[test]
+    fn move_tab_forward() {
+        // add_tab inserts after active: tabs=[0,1,2], active=2
+        let mut mgr = TabManager::new();
+        mgr.add_tab(dummy_tab()); // id=0
+        mgr.add_tab(dummy_tab()); // id=1
+        mgr.add_tab(dummy_tab()); // id=2
+        mgr.switch_to(0); // active=0
+        mgr.move_tab(0, 2);
+        assert_eq!(mgr.active, 2); // active moved with tab
+        assert_eq!(mgr.tabs[0].id, 1);
+        assert_eq!(mgr.tabs[1].id, 2);
+        assert_eq!(mgr.tabs[2].id, 0);
+    }
+
+    #[test]
+    fn move_tab_backward() {
+        let mut mgr = TabManager::new();
+        mgr.add_tab(dummy_tab()); // id=0
+        mgr.add_tab(dummy_tab()); // id=1
+        mgr.add_tab(dummy_tab()); // id=2
+        // tabs=[0,1,2], active=2
+        mgr.move_tab(2, 0);
+        assert_eq!(mgr.active, 0); // active moved with tab
+        assert_eq!(mgr.tabs[0].id, 2);
+        assert_eq!(mgr.tabs[1].id, 0);
+        assert_eq!(mgr.tabs[2].id, 1);
+    }
+
+    #[test]
+    fn move_tab_active_between_forward() {
+        let mut mgr = TabManager::new();
+        mgr.add_tab(dummy_tab()); // id=0
+        mgr.add_tab(dummy_tab()); // id=1
+        mgr.add_tab(dummy_tab()); // id=2
+        // tabs=[0,1,2], active=2
+        mgr.switch_to(1); // active=1
+        // move tab 0 to 2: active(1) is in (from..=to] => shifted left
+        mgr.move_tab(0, 2);
+        assert_eq!(mgr.active, 0);
+    }
+
+    #[test]
+    fn move_tab_active_between_backward() {
+        let mut mgr = TabManager::new();
+        mgr.add_tab(dummy_tab()); // id=0
+        mgr.add_tab(dummy_tab()); // id=1
+        mgr.add_tab(dummy_tab()); // id=2
+        // tabs=[0,1,2], active=2
+        mgr.switch_to(1); // active=1
+        // move tab 2 to 0: active(1) is in [to..from) => shifted right
+        mgr.move_tab(2, 0);
+        assert_eq!(mgr.active, 2);
+    }
+
+    #[test]
+    fn move_tab_noop_same_index() {
+        let mut mgr = TabManager::new();
+        mgr.add_tab(dummy_tab());
+        mgr.add_tab(dummy_tab());
+        mgr.move_tab(0, 0);
+        assert_eq!(mgr.tabs[0].id, 0);
+    }
+
+    #[test]
+    fn move_tab_out_of_bounds() {
+        let mut mgr = TabManager::new();
+        mgr.add_tab(dummy_tab());
+        mgr.add_tab(dummy_tab());
+        mgr.move_tab(0, 5); // should be noop
+        assert_eq!(mgr.tabs[0].id, 0);
     }
 
     #[test]
