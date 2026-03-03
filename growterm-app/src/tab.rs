@@ -42,6 +42,21 @@ pub struct TabBarInfo {
     pub active_index: usize,
 }
 
+/// Compute content Y offset — shared between renderer and mouse coordinate translation.
+/// Must match the renderer's y_off logic exactly.
+pub fn content_y_offset(show_tab_bar: bool, tab_bar_h: f32, title_bar_h: f32, screen_full: bool) -> f32 {
+    let transparent = title_bar_h > 0.0;
+    if transparent && screen_full {
+        0.0
+    } else if !show_tab_bar {
+        if transparent { title_bar_h } else { 0.0 }
+    } else if transparent {
+        title_bar_h + tab_bar_h
+    } else {
+        tab_bar_h
+    }
+}
+
 impl TabManager {
     pub fn new() -> Self {
         Self {
@@ -148,10 +163,9 @@ impl TabManager {
         }
     }
 
-    /// Y pixel offset for mouse events (title bar + tab bar height).
-    pub fn mouse_y_offset(&self, tab_bar_h: f32, title_bar_h: f32) -> f32 {
-        let tab = if self.show_tab_bar() { tab_bar_h } else { 0.0 };
-        title_bar_h + tab
+    /// Y pixel offset for mouse events — mirrors renderer y_off logic.
+    pub fn mouse_y_offset(&self, tab_bar_h: f32, title_bar_h: f32, screen_full: bool) -> f32 {
+        content_y_offset(self.show_tab_bar(), tab_bar_h, title_bar_h, screen_full)
     }
 
     pub fn move_tab(&mut self, from: usize, to: usize) {
@@ -1187,28 +1201,43 @@ mod tests {
     }
 
     #[test]
-    fn mouse_y_offset_zero_when_single_tab_no_title_bar() {
+    fn mouse_y_offset_no_title_bar_no_scrollback() {
         let mut mgr = TabManager::new();
         mgr.add_tab(dummy_tab());
-        assert!(!mgr.show_tab_bar());
-        assert_eq!(mgr.mouse_y_offset(20.0, 0.0), 0.0);
+        assert_eq!(mgr.mouse_y_offset(20.0, 0.0, false), 0.0);
     }
 
     #[test]
-    fn mouse_y_offset_includes_title_bar_height() {
+    fn mouse_y_offset_title_bar_no_scrollback() {
         let mut mgr = TabManager::new();
         mgr.add_tab(dummy_tab());
-        assert!(!mgr.show_tab_bar());
-        assert_eq!(mgr.mouse_y_offset(20.0, 50.0), 50.0);
+        // transparent mode, no scrollback: includes title bar
+        assert_eq!(mgr.mouse_y_offset(20.0, 50.0, false), 50.0);
     }
 
     #[test]
-    fn mouse_y_offset_equals_tab_bar_plus_title_bar_when_multiple_tabs() {
+    fn mouse_y_offset_title_bar_with_scrollback() {
+        let mut mgr = TabManager::new();
+        mgr.add_tab(dummy_tab());
+        // transparent mode, screen_full: title bar excluded (renderer uses y_off=0)
+        assert_eq!(mgr.mouse_y_offset(20.0, 50.0, true), 0.0);
+    }
+
+    #[test]
+    fn mouse_y_offset_tabs_plus_title_bar_no_scrollback() {
         let mut mgr = TabManager::new();
         mgr.add_tab(dummy_tab());
         mgr.add_tab(dummy_tab());
-        assert!(mgr.show_tab_bar());
-        assert_eq!(mgr.mouse_y_offset(30.0, 50.0), 80.0);
+        assert_eq!(mgr.mouse_y_offset(30.0, 50.0, false), 80.0);
+    }
+
+    #[test]
+    fn mouse_y_offset_tabs_with_scrollback() {
+        let mut mgr = TabManager::new();
+        mgr.add_tab(dummy_tab());
+        mgr.add_tab(dummy_tab());
+        // transparent + screen_full: renderer uses y_off=0
+        assert_eq!(mgr.mouse_y_offset(30.0, 50.0, true), 0.0);
     }
 
     #[test]
