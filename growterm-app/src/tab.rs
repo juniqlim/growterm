@@ -148,13 +148,10 @@ impl TabManager {
         }
     }
 
-    /// Y pixel offset for mouse events (tab bar height or 0).
-    pub fn mouse_y_offset(&self, tab_bar_h: f32) -> f32 {
-        if self.show_tab_bar() {
-            tab_bar_h
-        } else {
-            0.0
-        }
+    /// Y pixel offset for mouse events (title bar + tab bar height).
+    pub fn mouse_y_offset(&self, tab_bar_h: f32, title_bar_h: f32) -> f32 {
+        let tab = if self.show_tab_bar() { tab_bar_h } else { 0.0 };
+        title_bar_h + tab
     }
 
     pub fn move_tab(&mut self, from: usize, to: usize) {
@@ -1190,20 +1187,28 @@ mod tests {
     }
 
     #[test]
-    fn mouse_y_offset_zero_when_single_tab() {
+    fn mouse_y_offset_zero_when_single_tab_no_title_bar() {
         let mut mgr = TabManager::new();
         mgr.add_tab(dummy_tab());
         assert!(!mgr.show_tab_bar());
-        assert_eq!(mgr.mouse_y_offset(20.0), 0.0);
+        assert_eq!(mgr.mouse_y_offset(20.0, 0.0), 0.0);
     }
 
     #[test]
-    fn mouse_y_offset_equals_tab_bar_height_when_multiple_tabs() {
+    fn mouse_y_offset_includes_title_bar_height() {
+        let mut mgr = TabManager::new();
+        mgr.add_tab(dummy_tab());
+        assert!(!mgr.show_tab_bar());
+        assert_eq!(mgr.mouse_y_offset(20.0, 50.0), 50.0);
+    }
+
+    #[test]
+    fn mouse_y_offset_equals_tab_bar_plus_title_bar_when_multiple_tabs() {
         let mut mgr = TabManager::new();
         mgr.add_tab(dummy_tab());
         mgr.add_tab(dummy_tab());
         assert!(mgr.show_tab_bar());
-        assert_eq!(mgr.mouse_y_offset(30.0), 30.0);
+        assert_eq!(mgr.mouse_y_offset(30.0, 50.0), 80.0);
     }
 
     #[test]
