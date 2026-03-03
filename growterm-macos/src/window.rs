@@ -150,6 +150,10 @@ impl MacWindow {
         set_view_menu_item_checked(2, checked);
     }
 
+    pub fn set_transparent_tab_bar_checked(&self, checked: bool) {
+        set_view_menu_item_checked(3, checked);
+    }
+
     pub fn show(&self) {
         self.ns_window.makeKeyAndOrderFront(None);
     }

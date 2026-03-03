@@ -7,7 +7,7 @@ use crate::atlas::GlyphAtlas;
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct BgVertex {
     position: [f32; 2],
-    color: [f32; 3],
+    color: [f32; 4],
 }
 
 #[repr(C)]
@@ -249,7 +249,7 @@ impl GpuDrawer {
                 buffers: &[wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<BgVertex>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x3],
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x4],
                 }],
                 compilation_options: Default::default(),
             },
@@ -258,7 +258,7 @@ impl GpuDrawer {
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: render_format,
-                    blend: None,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: Default::default(),
@@ -285,7 +285,7 @@ impl GpuDrawer {
                 buffers: &[wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<BgVertex>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x3],
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x4],
                 }],
                 compilation_options: Default::default(),
             },
@@ -433,6 +433,8 @@ impl GpuDrawer {
         tab_bar: Option<&TabBarInfo>,
         is_break: bool,
         break_text: Option<&[String]>,
+        transparent_tab_bar: bool,
+        screen_full: bool,
     ) {
         if self.surface_dirty {
             self.surface_dirty = false;
@@ -457,10 +459,10 @@ impl GpuDrawer {
         });
 
         let (cell_w, cell_h) = self.atlas.cell_size();
-        let y_off = if tab_bar.is_some() {
-            self.tab_bar_height()
-        } else {
+        let y_off = if tab_bar.is_none() || (transparent_tab_bar && screen_full) {
             0.0
+        } else {
+            self.tab_bar_height()
         };
 
         // Build bg vertices
@@ -474,7 +476,7 @@ impl GpuDrawer {
             } else {
                 cell_w
             };
-            let color = rgb_to_f32(cmd.bg);
+            let color = rgb_to_f32a(cmd.bg);
 
             bg_vertices.push(BgVertex {
                 position: [x, y],
@@ -505,7 +507,7 @@ impl GpuDrawer {
             if cmd.flags.contains(CellFlags::UNDERLINE) {
                 let underline_h = (cell_h * 0.07).max(1.0);
                 let underline_y = y + cell_h - underline_h;
-                let fg_color = rgb_to_f32(cmd.fg);
+                let fg_color = rgb_to_f32a(cmd.fg);
                 push_bg_rect(&mut bg_vertices, x, underline_y, w, underline_h, fg_color);
             }
         }
@@ -515,7 +517,7 @@ impl GpuDrawer {
 
         // Helper: push a fg-colored rectangle into bg_vertices
         let push_rect =
-            |bg_verts: &mut Vec<BgVertex>, x: f32, y: f32, w: f32, h: f32, color: [f32; 3]| {
+            |bg_verts: &mut Vec<BgVertex>, x: f32, y: f32, w: f32, h: f32, color: [f32; 4]| {
                 push_bg_rect(bg_verts, x, y, w, h, color);
             };
 
@@ -532,7 +534,7 @@ impl GpuDrawer {
             if ch >= '\u{2580}' && ch <= '\u{259F}' && !(ch >= '\u{2591}' && ch <= '\u{2593}') {
                 let cx = cmd.col as f32 * cell_w;
                 let cy = y_off + cmd.row as f32 * cell_h;
-                let fg = rgb_to_f32(cmd.fg);
+                let fg = rgb_to_f32a(cmd.fg);
                 if push_block_element_rects(&mut bg_vertices, ch, cx, cy, cell_w, cell_h, fg) {
                     continue;
                 }
@@ -543,7 +545,7 @@ impl GpuDrawer {
                 if let Some(segs) = box_drawing_segments(ch) {
                     let cx = cmd.col as f32 * cell_w;
                     let cy = y_off + cmd.row as f32 * cell_h;
-                    let fg = rgb_to_f32(cmd.fg);
+                    let fg = rgb_to_f32a(cmd.fg);
                     let light_h = 1.0_f32;
                     let heavy_h = (cell_h / 8.0).ceil().max(2.0);
                     let light_w = 1.0_f32;
@@ -711,30 +713,33 @@ impl GpuDrawer {
             let x0 = screen_w - bar_w;
             let y0 = y_off + thumb_top_ratio * term_h;
             let h = thumb_height_ratio * term_h;
-            let color = [0.5, 0.5, 0.5];
+            let color = [0.5, 0.5, 0.5, 1.0];
             push_rect(&mut bg_vertices, x0, y0, bar_w, h, color);
         }
 
-        // Tab bar
+        // Tab bar (build vertices; rendered as overlay when transparent, as bg when opaque)
+        let mut tab_bg_verts: Vec<BgVertex> = Vec::new();
+        let mut tab_glyph_verts: Vec<GlyphVertex> = Vec::new();
         if let Some(tab_info) = tab_bar {
             let (tab_cw, tab_ch) = self.tab_atlas.cell_size();
             let tab_ascent = self.tab_atlas.ascent();
             let bar_h = self.tab_bar_height();
             let screen_w = self.surface_config.width as f32;
-            let bar_bg: [f32; 3] = [0.0, 0.0, 0.0];
-            let active_bg: [f32; 3] = [0.0, 0.0, 0.0];
-            let dragging_bg: [f32; 3] = [0.4, 0.4, 0.2];
+            let bar_bg: [f32; 4] = if transparent_tab_bar {
+                [0.0, 0.0, 0.0, 0.8]
+            } else {
+                [0.0, 0.0, 0.0, 1.0]
+            };
+            let dragging_bg: [f32; 4] = [0.4, 0.4, 0.2, 1.0];
 
-            push_rect(&mut bg_vertices, 0.0, 0.0, screen_w, bar_h, bar_bg);
+            push_bg_rect(&mut tab_bg_verts, 0.0, 0.0, screen_w, bar_h, bar_bg);
 
             let tab_count = tab_info.titles.len().max(1) as f32;
             let tab_w = screen_w / tab_count;
             let mut x = 0.0_f32;
             for (i, title) in tab_info.titles.iter().enumerate() {
                 if tab_info.dragging_index == Some(i) {
-                    push_rect(&mut bg_vertices, x, 0.0, tab_w, bar_h, dragging_bg);
-                } else if i == tab_info.active_index {
-                    push_rect(&mut bg_vertices, x, 0.0, tab_w, bar_h, active_bg);
+                    push_bg_rect(&mut tab_bg_verts, x, 0.0, tab_w, bar_h, dragging_bg);
                 }
 
                 let text_w = title.chars().count() as f32 * tab_cw;
@@ -756,32 +761,32 @@ impl GpuDrawer {
                         } else {
                             [0.4, 0.4, 0.4]
                         };
-                        glyph_vertices.push(GlyphVertex {
+                        tab_glyph_verts.push(GlyphVertex {
                             position: [gx, gy],
                             tex_coords: [region.u0, region.v0],
                             color,
                         });
-                        glyph_vertices.push(GlyphVertex {
+                        tab_glyph_verts.push(GlyphVertex {
                             position: [gx + gw, gy],
                             tex_coords: [region.u1, region.v0],
                             color,
                         });
-                        glyph_vertices.push(GlyphVertex {
+                        tab_glyph_verts.push(GlyphVertex {
                             position: [gx, gy + gh],
                             tex_coords: [region.u0, region.v1],
                             color,
                         });
-                        glyph_vertices.push(GlyphVertex {
+                        tab_glyph_verts.push(GlyphVertex {
                             position: [gx + gw, gy],
                             tex_coords: [region.u1, region.v0],
                             color,
                         });
-                        glyph_vertices.push(GlyphVertex {
+                        tab_glyph_verts.push(GlyphVertex {
                             position: [gx + gw, gy + gh],
                             tex_coords: [region.u1, region.v1],
                             color,
                         });
-                        glyph_vertices.push(GlyphVertex {
+                        tab_glyph_verts.push(GlyphVertex {
                             position: [gx, gy + gh],
                             tex_coords: [region.u0, region.v1],
                             color,
@@ -853,12 +858,37 @@ impl GpuDrawer {
                 pass.draw(0..glyph_vertices.len() as u32, 0..1);
             }
 
+            // Pass 2.5: tab bar (uses bg_pipeline with alpha blending)
+            if !tab_bg_verts.is_empty() {
+                let tab_bg_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("tab_bg_vb"),
+                    contents: bytemuck::cast_slice(&tab_bg_verts),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+                pass.set_pipeline(&self.bg_pipeline);
+                pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+                pass.set_vertex_buffer(0, tab_bg_buffer.slice(..));
+                pass.draw(0..tab_bg_verts.len() as u32, 0..1);
+            }
+            if !tab_glyph_verts.is_empty() {
+                let tab_glyph_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("tab_glyph_vb"),
+                    contents: bytemuck::cast_slice(&tab_glyph_verts),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+                pass.set_pipeline(&self.glyph_pipeline);
+                pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+                pass.set_bind_group(1, &self.glyph_texture_bind_group, &[]);
+                pass.set_vertex_buffer(0, tab_glyph_buffer.slice(..));
+                pass.draw(0..tab_glyph_verts.len() as u32, 0..1);
+            }
+
             // Pass 3: break overlay (semi-transparent red tint over everything)
             if is_break {
                 let screen_w = self.surface_config.width as f32;
                 let screen_h = self.surface_config.height as f32;
                 let mut overlay_verts: Vec<BgVertex> = Vec::new();
-                push_bg_rect(&mut overlay_verts, 0.0, 0.0, screen_w, screen_h, [0.6, 0.0, 0.0]);
+                push_bg_rect(&mut overlay_verts, 0.0, 0.0, screen_w, screen_h, [0.6, 0.0, 0.0, 1.0]);
                 let overlay_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("overlay_vb"),
                     contents: bytemuck::cast_slice(&overlay_verts),
@@ -888,7 +918,7 @@ impl GpuDrawer {
                 let bg_w = (max_line_w + pad * 2.0).min(screen_w);
                 let bg_h = (total_height + pad * 2.0).min(screen_h);
                 let mut coaching_bg_verts: Vec<BgVertex> = Vec::new();
-                push_bg_rect(&mut coaching_bg_verts, bg_x, bg_y, bg_w, bg_h, [0.0, 0.0, 0.0]);
+                push_bg_rect(&mut coaching_bg_verts, bg_x, bg_y, bg_w, bg_h, [0.0, 0.0, 0.0, 1.0]);
                 let coaching_bg_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("coaching_bg_vb"),
                     contents: bytemuck::cast_slice(&coaching_bg_verts),
@@ -1109,7 +1139,12 @@ fn rgb_to_f32(rgb: Rgb) -> [f32; 3] {
     ]
 }
 
-fn push_bg_rect(bg_verts: &mut Vec<BgVertex>, x: f32, y: f32, w: f32, h: f32, color: [f32; 3]) {
+fn rgb_to_f32a(rgb: Rgb) -> [f32; 4] {
+    let [r, g, b] = rgb_to_f32(rgb);
+    [r, g, b, 1.0]
+}
+
+fn push_bg_rect(bg_verts: &mut Vec<BgVertex>, x: f32, y: f32, w: f32, h: f32, color: [f32; 4]) {
     bg_verts.push(BgVertex {
         position: [x, y],
         color,
@@ -1143,7 +1178,7 @@ fn push_block_element_rects(
     cy: f32,
     cell_w: f32,
     cell_h: f32,
-    fg: [f32; 3],
+    fg: [f32; 4],
 ) -> bool {
     let hw = cell_w / 2.0;
     let hh = cell_h / 2.0;

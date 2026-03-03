@@ -31,6 +31,8 @@ pub enum AppEvent {
     ToggleResponseTimer,
     /// AI 코칭 토글
     ToggleCoaching,
+    /// 반투명 탭바 토글
+    ToggleTransparentTabBar,
 }
 
 bitflags::bitflags! {

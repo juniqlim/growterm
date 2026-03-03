@@ -215,6 +215,11 @@ define_class! {
             self.send_event(AppEvent::ToggleCoaching);
         }
 
+        #[unsafe(method(toggleTransparentTabBar:))]
+        fn toggle_transparent_tab_bar(&self, _sender: &AnyObject) {
+            self.send_event(AppEvent::ToggleTransparentTabBar);
+        }
+
         #[unsafe(method(viewDidChangeBackingProperties))]
         fn view_did_change_backing_properties(&self) {
             let _: () = unsafe { msg_send![super(self), viewDidChangeBackingProperties] };
