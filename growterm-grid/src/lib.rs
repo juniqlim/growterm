@@ -4,6 +4,8 @@ use std::io::Write;
 
 const MAX_SCROLLBACK: usize = 10_000;
 
+// 디버깅 시 /tmp/growterm-debug.log 에 로그 남길 때 사용
+#[allow(dead_code)]
 fn debug_log(msg: &str) {
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)

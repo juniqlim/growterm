@@ -89,6 +89,7 @@ fn setup_main_menu(app: &NSApplication) {
         menubar.addItem(&view_menu_item);
 
         let view_menu = NSMenu::initWithTitle(mtm.alloc(), &NSString::from_str("View"));
+        view_menu.setAutoenablesItems(false);
         let pomodoro_title = NSString::from_str("Pomodoro Timer");
         let pomodoro_key = NSString::from_str("p");
         let pomodoro_item = NSMenuItem::initWithTitle_action_keyEquivalent(

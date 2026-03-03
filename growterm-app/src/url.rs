@@ -1,13 +1,46 @@
-/// Find a URL at the given column position in the text.
+/// Find a URL at the given column (character index) position in the text.
 /// Returns the URL string if `col` falls within a URL range.
 pub fn find_url_at(text: &str, col: usize) -> Option<&str> {
-    let (start, end) = find_url_range_at(text, col)?;
+    let byte_col = char_to_byte(text, col)?;
+    let (start, end) = find_url_byte_range_at(text, byte_col)?;
     Some(&text[start..end])
 }
 
-/// Find the byte range of a URL at the given column position.
-/// Returns (start, end) byte offsets if `col` falls within a URL range.
+/// Find the column (character index) range of a URL at the given column position.
+/// Returns (start_col, end_col) character indices if `col` falls within a URL range.
 pub fn find_url_range_at(text: &str, col: usize) -> Option<(usize, usize)> {
+    let byte_col = char_to_byte(text, col)?;
+    let (byte_start, byte_end) = find_url_byte_range_at(text, byte_col)?;
+    let col_start = byte_to_char(text, byte_start);
+    let col_end = byte_to_char(text, byte_end);
+    Some((col_start, col_end))
+}
+
+/// Convert character index to byte offset. Returns None if out of bounds.
+fn char_to_byte(text: &str, char_idx: usize) -> Option<usize> {
+    if char_idx == 0 {
+        return Some(0);
+    }
+    text.char_indices()
+        .nth(char_idx)
+        .map(|(byte_offset, _)| byte_offset)
+        .or_else(|| {
+            // char_idx == text.chars().count() means "one past end"
+            if char_idx <= text.chars().count() {
+                Some(text.len())
+            } else {
+                None
+            }
+        })
+}
+
+/// Convert byte offset to character index.
+fn byte_to_char(text: &str, byte_offset: usize) -> usize {
+    text[..byte_offset].chars().count()
+}
+
+/// Find the byte range of a URL at the given byte offset.
+fn find_url_byte_range_at(text: &str, col: usize) -> Option<(usize, usize)> {
     let mut search_start = 0;
     loop {
         let rest = &text[search_start..];
@@ -209,5 +242,30 @@ mod tests {
         let text = "a https://first.com b https://second.com c";
         assert_eq!(find_url_range_at(text, 2), Some((2, 19)));
         assert_eq!(find_url_range_at(text, 22), Some((22, 40)));
+    }
+
+    #[test]
+    fn url_after_multibyte_chars() {
+        // "한글 " = 3 characters, but 7 bytes (3+3+1)
+        let text = "한글 https://example.com end";
+        // col 3 = 'h' of https (character index 3)
+        assert_eq!(find_url_at(text, 3), Some("https://example.com"));
+        assert_eq!(find_url_range_at(text, 3), Some((3, 22)));
+        // col 0 = '한', not a URL
+        assert_eq!(find_url_at(text, 0), None);
+    }
+
+    #[test]
+    fn url_range_after_multibyte_returns_char_indices() {
+        // "가 " = 2 chars (but 4 bytes: 3+1)
+        let text = "가 https://x.com done";
+        // URL starts at char index 2, "https://x.com" = 13 chars, ends at char 15
+        assert_eq!(find_url_range_at(text, 2), Some((2, 15)));
+    }
+
+    #[test]
+    fn col_past_text_length_multibyte() {
+        let text = "한글";
+        assert_eq!(find_url_at(text, 100), None);
     }
 }
