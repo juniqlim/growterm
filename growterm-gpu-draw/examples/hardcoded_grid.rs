@@ -107,7 +107,7 @@ impl ApplicationHandler for App {
             }
             WindowEvent::RedrawRequested => {
                 if let Some(drawer) = &mut self.drawer {
-                    drawer.draw(&self.commands, None, None, false);
+                    drawer.draw(&self.commands, None, None, false, None, false, false, 0.0, 0.0);
                 }
             }
             _ => {}

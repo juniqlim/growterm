@@ -64,6 +64,23 @@ struct GlyphRegion {
 }
 
 const GLYPH_TEXTURE_SIZE: u32 = 1024;
+/// Push a textured quad (2 triangles, 6 vertices) for a glyph.
+fn push_glyph_quad(
+    verts: &mut Vec<GlyphVertex>,
+    region: &GlyphRegion,
+    gx: f32, gy: f32,
+    color: [f32; 3],
+) {
+    let gw = region.width as f32;
+    let gh = region.height as f32;
+    verts.push(GlyphVertex { position: [gx, gy], tex_coords: [region.u0, region.v0], color });
+    verts.push(GlyphVertex { position: [gx + gw, gy], tex_coords: [region.u1, region.v0], color });
+    verts.push(GlyphVertex { position: [gx, gy + gh], tex_coords: [region.u0, region.v1], color });
+    verts.push(GlyphVertex { position: [gx + gw, gy], tex_coords: [region.u1, region.v0], color });
+    verts.push(GlyphVertex { position: [gx + gw, gy + gh], tex_coords: [region.u1, region.v1], color });
+    verts.push(GlyphVertex { position: [gx, gy + gh], tex_coords: [region.u0, region.v1], color });
+}
+
 const TAB_FONT_SIZE: f32 = 24.0;
 const TAB_BAR_PADDING: f32 = 8.0;
 
@@ -684,41 +701,10 @@ impl GpuDrawer {
             let baseline_y = cell_y + cell_h * 0.8; // approximate baseline
             let gx = cell_x + region.offset_x;
             let gy = baseline_y - region.offset_y - region.height as f32;
-            let gw = region.width as f32;
-            let gh = region.height as f32;
 
             let color = rgb_to_f32(cmd.fg);
 
-            glyph_vertices.push(GlyphVertex {
-                position: [gx, gy],
-                tex_coords: [region.u0, region.v0],
-                color,
-            });
-            glyph_vertices.push(GlyphVertex {
-                position: [gx + gw, gy],
-                tex_coords: [region.u1, region.v0],
-                color,
-            });
-            glyph_vertices.push(GlyphVertex {
-                position: [gx, gy + gh],
-                tex_coords: [region.u0, region.v1],
-                color,
-            });
-            glyph_vertices.push(GlyphVertex {
-                position: [gx + gw, gy],
-                tex_coords: [region.u1, region.v0],
-                color,
-            });
-            glyph_vertices.push(GlyphVertex {
-                position: [gx + gw, gy + gh],
-                tex_coords: [region.u1, region.v1],
-                color,
-            });
-            glyph_vertices.push(GlyphVertex {
-                position: [gx, gy + gh],
-                tex_coords: [region.u0, region.v1],
-                color,
-            });
+            push_glyph_quad(&mut glyph_vertices, &region, gx, gy, color);
         }
 
         // Scrollbar
@@ -781,43 +767,12 @@ impl GpuDrawer {
                         let baseline_y = tab_y + (bar_h - tab_ch) / 2.0 + tab_ascent;
                         let gx = cx + region.offset_x;
                         let gy = baseline_y - region.offset_y - region.height as f32;
-                        let gw = region.width as f32;
-                        let gh = region.height as f32;
                         let color: [f32; 3] = if i == tab_info.active_index {
                             [1.0, 1.0, 1.0]
                         } else {
                             [0.4, 0.4, 0.4]
                         };
-                        tab_glyph_verts.push(GlyphVertex {
-                            position: [gx, gy],
-                            tex_coords: [region.u0, region.v0],
-                            color,
-                        });
-                        tab_glyph_verts.push(GlyphVertex {
-                            position: [gx + gw, gy],
-                            tex_coords: [region.u1, region.v0],
-                            color,
-                        });
-                        tab_glyph_verts.push(GlyphVertex {
-                            position: [gx, gy + gh],
-                            tex_coords: [region.u0, region.v1],
-                            color,
-                        });
-                        tab_glyph_verts.push(GlyphVertex {
-                            position: [gx + gw, gy],
-                            tex_coords: [region.u1, region.v0],
-                            color,
-                        });
-                        tab_glyph_verts.push(GlyphVertex {
-                            position: [gx + gw, gy + gh],
-                            tex_coords: [region.u1, region.v1],
-                            color,
-                        });
-                        tab_glyph_verts.push(GlyphVertex {
-                            position: [gx, gy + gh],
-                            tex_coords: [region.u0, region.v1],
-                            color,
-                        });
+                        push_glyph_quad(&mut tab_glyph_verts, &region, gx, gy, color);
                     }
                     cx += tab_cw;
                 }
@@ -1392,7 +1347,7 @@ mod tests {
             0.0,
             10.0,
             20.0,
-            [1.0, 1.0, 1.0],
+            [1.0, 1.0, 1.0, 1.0],
         );
         assert!(handled);
         assert_eq!(vertices.len(), 6);
@@ -1408,7 +1363,7 @@ mod tests {
             0.0,
             10.0,
             20.0,
-            [1.0, 1.0, 1.0],
+            [1.0, 1.0, 1.0, 1.0],
         );
         assert!(!handled);
         assert!(vertices.is_empty());

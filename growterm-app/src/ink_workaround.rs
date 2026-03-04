@@ -325,7 +325,7 @@ mod tests {
     #[test]
     fn preedit_pos_uses_inverse_cursor() {
         let state = active_state();
-        let mut row1 = make_row_with_wide(&[("❯ ", false), ("하이", true)], 80);
+        let row1 = make_row_with_wide(&[("❯ ", false), ("하이", true)], 80);
         let mut row2 = make_row("  ", 80);
         set_inverse(&mut row2, 2); // Ink cursor at col 2 on empty line
         let cells = vec![
