@@ -182,7 +182,7 @@ impl MacWindow {
     }
 }
 
-fn set_view_menu_item_checked(index: isize, checked: bool) {
+fn with_view_menu_item(index: isize, f: impl FnOnce(&objc2_app_kit::NSMenuItem) + Send + 'static) {
     dispatch_async_main(move || {
         let mtm = MainThreadMarker::new().unwrap();
         let app = objc2_app_kit::NSApplication::sharedApplication(mtm);
@@ -190,8 +190,7 @@ fn set_view_menu_item_checked(index: isize, checked: bool) {
             if let Some(view_menu_item) = menu.itemAtIndex(1) {
                 if let Some(view_menu) = view_menu_item.submenu() {
                     if let Some(item) = view_menu.itemAtIndex(index) {
-                        let state = if checked { 1 } else { 0 };
-                        item.setState(state);
+                        f(&item);
                     }
                 }
             }
@@ -199,19 +198,15 @@ fn set_view_menu_item_checked(index: isize, checked: bool) {
     });
 }
 
+fn set_view_menu_item_checked(index: isize, checked: bool) {
+    with_view_menu_item(index, move |item| {
+        item.setState(if checked { 1 } else { 0 });
+    });
+}
+
 fn set_view_menu_item_enabled(index: isize, enabled: bool) {
-    dispatch_async_main(move || {
-        let mtm = MainThreadMarker::new().unwrap();
-        let app = objc2_app_kit::NSApplication::sharedApplication(mtm);
-        if let Some(menu) = app.mainMenu() {
-            if let Some(view_menu_item) = menu.itemAtIndex(1) {
-                if let Some(view_menu) = view_menu_item.submenu() {
-                    if let Some(item) = view_menu.itemAtIndex(index) {
-                        item.setEnabled(enabled);
-                    }
-                }
-            }
-        }
+    with_view_menu_item(index, move |item| {
+        item.setEnabled(enabled);
     });
 }
 

@@ -248,11 +248,7 @@ fn find_claude_path() -> String {
 }
 
 fn coaching_dir() -> std::path::PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    std::path::PathBuf::from(home)
-        .join(".config")
-        .join("growterm")
-        .join("coaching")
+    crate::config::config_dir().join("coaching")
 }
 
 fn save_coaching_file(dir: &std::path::Path, lines: &[String]) {
@@ -278,14 +274,14 @@ fn save_coaching_file(dir: &std::path::Path, lines: &[String]) {
     }
 }
 
+fn stdout_trimmed(output: std::io::Result<std::process::Output>) -> Option<String> {
+    output.ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+}
+
 /// Returns (daily_filename, full_timestamp) e.g. ("20260304.md", "2026-03-04 13:11:51")
 fn local_date_and_timestamp() -> (String, String) {
     use std::process::Command;
-    let date_out = Command::new("date").arg("+%Y%m%d").output();
-    let ts_out = Command::new("date").arg("+%Y-%m-%d %H:%M:%S").output();
-    let date = date_out
-        .ok()
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    let date = stdout_trimmed(Command::new("date").arg("+%Y%m%d").output())
         .unwrap_or_else(|| {
             let secs = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -293,9 +289,7 @@ fn local_date_and_timestamp() -> (String, String) {
                 .as_secs();
             secs.to_string()
         });
-    let timestamp = ts_out
-        .ok()
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    let timestamp = stdout_trimmed(Command::new("date").arg("+%Y-%m-%d %H:%M:%S").output())
         .unwrap_or_else(|| date.clone());
     (format!("{date}.md"), timestamp)
 }
