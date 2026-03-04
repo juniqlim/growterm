@@ -200,10 +200,13 @@ pub fn spawn_ai_coaching(
             당신은 코치입니다. 판단하거나 가르치지 마세요. \
             관찰한 내용을 짧게 알려주고, 사용자가 미처 보지 못했을 부분을 질문으로 던져주세요. \
             한국어로 3-4문장 이내로 답하세요.";
-        let cmd = coaching_command.unwrap_or_else(|| {
-            let claude_path = find_claude_path();
-            format!("{claude_path} --system '{default_system}' -p")
-        });
+        let cmd = match coaching_command {
+            Some(c) => resolve_claude_in_command(&c),
+            None => {
+                let claude_path = find_claude_path();
+                format!("{claude_path} --system '{default_system}' -p")
+            }
+        };
         let mut child = match std::process::Command::new("sh")
             .args(["-c", &cmd])
             .stdin(std::process::Stdio::piped())
@@ -246,11 +249,40 @@ pub fn spawn_ai_coaching(
 
 fn find_claude_path() -> String {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    let local_bin = format!("{home}/.local/bin/claude");
-    if std::path::Path::new(&local_bin).exists() {
-        return local_bin;
+    let candidates = [
+        format!("{home}/.local/bin/claude"),
+        "/usr/local/bin/claude".to_string(),
+        "/opt/homebrew/bin/claude".to_string(),
+    ];
+    for path in &candidates {
+        if std::path::Path::new(path).exists() {
+            return path.clone();
+        }
+    }
+    // Resolve via user's login shell (handles Finder-launched apps with minimal PATH)
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "sh".to_string());
+    if let Ok(output) = std::process::Command::new(&shell)
+        .args(["-lc", "command -v claude"])
+        .output()
+    {
+        let resolved = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !resolved.is_empty() && output.status.success() {
+            return resolved;
+        }
     }
     "claude".to_string()
+}
+
+/// Replace a bare `claude` at the start of a command with its absolute path.
+fn resolve_claude_in_command(cmd: &str) -> String {
+    replace_bare_claude(cmd, &find_claude_path())
+}
+
+fn replace_bare_claude(cmd: &str, claude_path: &str) -> String {
+    if claude_path != "claude" && (cmd.starts_with("claude ") || cmd == "claude") {
+        return format!("{claude_path}{}", &cmd["claude".len()..]);
+    }
+    cmd.to_string()
 }
 
 fn coaching_dir() -> std::path::PathBuf {
@@ -570,12 +602,48 @@ mod tests {
     fn find_claude_path_returns_absolute_path_when_exists() {
         let path = find_claude_path();
         let home = std::env::var("HOME").unwrap();
-        let expected = format!("{home}/.local/bin/claude");
-        if std::path::Path::new(&expected).exists() {
-            assert_eq!(path, expected);
+        let candidates = [
+            format!("{home}/.local/bin/claude"),
+            "/usr/local/bin/claude".to_string(),
+            "/opt/homebrew/bin/claude".to_string(),
+        ];
+        let any_candidate_exists = candidates.iter().any(|c| std::path::Path::new(c).exists());
+        if any_candidate_exists {
+            assert!(
+                candidates.contains(&path),
+                "path should be one of the known candidates, got: {path}"
+            );
             assert!(path.starts_with('/'), "should be absolute path, got: {path}");
         } else {
-            assert_eq!(path, "claude");
+            // Falls back to login shell resolution or bare "claude"
+            assert!(
+                path.starts_with('/') || path == "claude",
+                "should be absolute or bare 'claude', got: {path}"
+            );
         }
+    }
+
+    #[test]
+    fn replace_bare_claude_with_absolute_path() {
+        let result = replace_bare_claude("claude --system 'test' -p", "/usr/local/bin/claude");
+        assert_eq!(result, "/usr/local/bin/claude --system 'test' -p");
+    }
+
+    #[test]
+    fn replace_bare_claude_only_word() {
+        let result = replace_bare_claude("claude", "/home/user/.local/bin/claude");
+        assert_eq!(result, "/home/user/.local/bin/claude");
+    }
+
+    #[test]
+    fn replace_bare_claude_leaves_absolute_path_unchanged() {
+        let cmd = "/usr/local/bin/claude -p";
+        assert_eq!(replace_bare_claude(cmd, "/opt/homebrew/bin/claude"), cmd);
+    }
+
+    #[test]
+    fn replace_bare_claude_noop_when_path_is_bare() {
+        let cmd = "claude -p";
+        assert_eq!(replace_bare_claude(cmd, "claude"), cmd);
     }
 }
