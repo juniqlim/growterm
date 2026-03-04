@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -39,7 +39,7 @@ fn default_half_page_up() -> Vec<String> { vec!["l".into(), "u".into()] }
 fn default_yank() -> Vec<String> { vec!["y".into()] }
 fn default_exit() -> Vec<String> { vec!["q".into(), "Escape".into(), "`".into()] }
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct CopyModeKeys {
     #[serde(default = "default_down", deserialize_with = "deserialize_keys")]
     pub down: Vec<String>,
@@ -94,7 +94,7 @@ impl CopyModeKeys {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct Config {
     #[serde(default = "default_font_family")]
     pub font_family: String,
@@ -262,35 +262,9 @@ impl Config {
     pub fn save(&self) {
         let dir = config_dir();
         let _ = std::fs::create_dir_all(&dir);
-        let coaching_cmd_line = match &self.coaching_command {
-            Some(cmd) => format!("coaching_command = {:?}\n", cmd),
-            None => String::new(),
-        };
-        let mut window_lines = String::new();
-        if let Some(w) = self.window_width {
-            window_lines += &format!("window_width = {}\n", w);
+        if let Ok(content) = toml::to_string(self) {
+            let _ = std::fs::write(config_path(), content);
         }
-        if let Some(h) = self.window_height {
-            window_lines += &format!("window_height = {}\n", h);
-        }
-        if let Some(x) = self.window_x {
-            window_lines += &format!("window_x = {}\n", x);
-        }
-        if let Some(y) = self.window_y {
-            window_lines += &format!("window_y = {}\n", y);
-        }
-        let mut pomodoro_time_lines = String::new();
-        if self.pomodoro_work_minutes != default_pomodoro_work_minutes() {
-            pomodoro_time_lines += &format!("pomodoro_work_minutes = {}\n", self.pomodoro_work_minutes);
-        }
-        if self.pomodoro_break_minutes != default_pomodoro_break_minutes() {
-            pomodoro_time_lines += &format!("pomodoro_break_minutes = {}\n", self.pomodoro_break_minutes);
-        }
-        let content = format!(
-            "font_family = {:?}\nfont_size = {}\npomodoro = {}\n{pomodoro_time_lines}response_timer = {}\ncoaching = {}\ntransparent_tab_bar = {}\nheader_opacity = {}\n{coaching_cmd_line}{window_lines}",
-            self.font_family, self.font_size, self.pomodoro, self.response_timer, self.coaching, self.transparent_tab_bar, self.header_opacity,
-        );
-        let _ = std::fs::write(config_path(), content);
     }
 }
 
@@ -484,5 +458,38 @@ window_y = 50
         let toml = "font_size = 20.0\nunknown_field = 42\n";
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(config.font_size, 20.0);
+    }
+
+    #[test]
+    fn save_preserves_all_fields_roundtrip() {
+        let dir = std::env::temp_dir().join("growterm_test_save_roundtrip");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+
+        let mut config = Config::default();
+        config.pomodoro = true;
+        config.pomodoro_work_minutes = 2;
+        config.coaching_command = Some("claude -p".to_string());
+        config.window_x = Some(100.0);
+        config.window_y = Some(50.0);
+
+        let serialized = toml::to_string(&config).unwrap();
+        std::fs::write(&path, &serialized).unwrap();
+
+        // Simulate UI toggle: load, change one field, save again
+        let mut reloaded: Config = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        reloaded.transparent_tab_bar = true;
+        let serialized2 = toml::to_string(&reloaded).unwrap();
+        std::fs::write(&path, &serialized2).unwrap();
+
+        // Verify all fields survived
+        let final_config: Config = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(final_config.pomodoro_work_minutes, 2);
+        assert_eq!(final_config.coaching_command, Some("claude -p".to_string()));
+        assert!(final_config.transparent_tab_bar);
+        assert_eq!(final_config.window_x, Some(100.0));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

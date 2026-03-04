@@ -180,6 +180,16 @@ impl MacWindow {
     pub fn ns_window(&self) -> &NSWindow {
         &self.ns_window
     }
+
+    pub fn set_pointing_hand_cursor(&self, enabled: bool) {
+        use std::sync::atomic::Ordering;
+        crate::view::POINTING_HAND_CURSOR.store(enabled, Ordering::Relaxed);
+        if !enabled {
+            dispatch_async_main(|| {
+                objc2_app_kit::NSCursor::arrowCursor().set();
+            });
+        }
+    }
 }
 
 fn with_view_menu_item(index: isize, f: impl FnOnce(&objc2_app_kit::NSMenuItem) + Send + 'static) {

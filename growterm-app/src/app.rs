@@ -620,8 +620,10 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     if let Some(tab) = tabs.active_tab() {
                         let state = tab.terminal.lock().unwrap();
                         let row_text = selection::row_text_absolute(&state.grid, abs_row);
+                        let row_cells = selection::row_cells_absolute(&state.grid, abs_row);
                         drop(state);
-                        if let Some(found_url) = url::find_url_at(&row_text, col as usize) {
+                        let char_col = selection::cell_col_to_char_index(&row_cells, col as usize);
+                        if let Some(found_url) = url::find_url_at(&row_text, char_col) {
                             let _ = std::process::Command::new("open")
                                 .arg(found_url)
                                 .spawn();
@@ -729,10 +731,14 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                         let abs_row = screen_to_abs_row(&tabs, screen_row);
                         let state = tab.terminal.lock().unwrap();
                         let row_text = selection::row_text_absolute(&state.grid, abs_row);
+                        let row_cells = selection::row_cells_absolute(&state.grid, abs_row);
                         drop(state);
-                        if let Some((start, end)) = url::find_url_range_at(&row_text, col as usize)
+                        let char_col = selection::cell_col_to_char_index(&row_cells, col as usize);
+                        if let Some((start, end)) = url::find_url_range_at(&row_text, char_col)
                         {
-                            Some((abs_row, start as u16, end as u16))
+                            let start_cell = selection::char_index_to_cell_col(&row_cells, start) as u16;
+                            let end_cell = selection::char_index_to_cell_col(&row_cells, end) as u16;
+                            Some((abs_row, start_cell, end_cell))
                         } else {
                             None
                         }
@@ -743,6 +749,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     None
                 };
                 if new_range != hover_url_range {
+                    window.set_pointing_hand_cursor(new_range.is_some());
                     hover_url_range = new_range;
                     window.request_redraw();
                 }

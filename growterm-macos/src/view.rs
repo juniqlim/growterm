@@ -1,4 +1,5 @@
 use std::cell::{Cell, RefCell};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 
 use objc2::rc::Retained;
@@ -10,10 +11,13 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{
     NSArray, NSAttributedString, NSAttributedStringKey, NSCopying, NSPoint, NSRange,
-    NSRangePointer, NSRect, NSString, NSUInteger,
+    NSRangePointer, NSRect, NSString, NSURL, NSUInteger,
 };
 
 use crate::event::{AppEvent, Modifiers};
+
+/// App thread sets this; view reads it on mouseMoved to apply cursor synchronously.
+pub static POINTING_HAND_CURSOR: AtomicBool = AtomicBool::new(false);
 
 /// IME 상태 머신 (WezTerm 방식)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -130,6 +134,10 @@ define_class! {
             self.ivars().last_mouse_pos.set((x, y));
             let modifiers = convert_modifier_flags(event.modifierFlags());
             self.send_event(AppEvent::MouseMoved(x, y, modifiers));
+            // Apply cursor synchronously on main thread to prevent macOS from resetting it
+            if POINTING_HAND_CURSOR.load(Ordering::Relaxed) {
+                objc2_app_kit::NSCursor::pointingHandCursor().set();
+            }
         }
 
         #[unsafe(method(flagsChanged:))]
@@ -138,6 +146,9 @@ define_class! {
             let (x, y) = self.ivars().last_mouse_pos.get();
             let modifiers = convert_modifier_flags(event.modifierFlags());
             self.send_event(AppEvent::MouseMoved(x, y, modifiers));
+            if POINTING_HAND_CURSOR.load(Ordering::Relaxed) {
+                objc2_app_kit::NSCursor::pointingHandCursor().set();
+            }
         }
 
         #[unsafe(method(mouseDown:))]
@@ -513,6 +524,23 @@ fn url_string_to_path(url_str: &str) -> String {
     }
 }
 
+fn resolve_file_url(url_str: &str) -> String {
+    let ns_str = NSString::from_str(url_str);
+    if let Some(url) = NSURL::URLWithString(&ns_str) {
+        // filePathURL resolves file reference URLs (/.file/id=...) to actual paths
+        let resolved: Option<Retained<NSURL>> = unsafe { msg_send![&url, filePathURL] };
+        if let Some(resolved) = resolved {
+            if let Some(path) = resolved.path() {
+                return path.to_string();
+            }
+        }
+        if let Some(path) = url.path() {
+            return path.to_string();
+        }
+    }
+    url_string_to_path(url_str)
+}
+
 fn extract_dropped_paths(pasteboard: &objc2_app_kit::NSPasteboard) -> Option<Vec<String>> {
     let file_url_type = unsafe { objc2_app_kit::NSPasteboardTypeFileURL };
 
@@ -520,7 +548,7 @@ fn extract_dropped_paths(pasteboard: &objc2_app_kit::NSPasteboard) -> Option<Vec
         let paths: Vec<String> = items
             .iter()
             .filter_map(|item| item.stringForType(file_url_type))
-            .map(|url| url_string_to_path(&url.to_string()))
+            .map(|url| resolve_file_url(&url.to_string()))
             .filter(|s| !s.is_empty())
             .collect();
         if !paths.is_empty() {
@@ -618,6 +646,30 @@ mod tests {
         assert_eq!(
             parse_file_url_lines(input),
             vec!["/tmp/a.png".to_string()]
+        );
+    }
+
+    #[test]
+    fn resolve_file_url_normal_path() {
+        assert_eq!(
+            resolve_file_url("file:///Users/me/file.txt"),
+            "/Users/me/file.txt"
+        );
+    }
+
+    #[test]
+    fn resolve_file_url_with_spaces() {
+        assert_eq!(
+            resolve_file_url("file:///Users/me/my%20file.txt"),
+            "/Users/me/my file.txt"
+        );
+    }
+
+    #[test]
+    fn resolve_file_url_korean() {
+        assert_eq!(
+            resolve_file_url("file:///Users/me/%ED%95%9C%EA%B8%80.txt"),
+            "/Users/me/한글.txt"
         );
     }
 }

@@ -289,6 +289,53 @@ pub fn row_text_absolute(grid: &growterm_grid::Grid, abs_row: u32) -> String {
     collect_line_text(line)
 }
 
+/// Convert cell column (wide char = 2 cols) to char index (wide char = 1).
+pub fn cell_col_to_char_index(line: &[Cell], cell_col: usize) -> usize {
+    let mut char_idx = 0;
+    let mut col = 0;
+    while col < line.len() && col < cell_col {
+        if line[col].flags.contains(CellFlags::WIDE_CHAR) {
+            col += 2;
+        } else {
+            col += 1;
+        }
+        char_idx += 1;
+    }
+    char_idx
+}
+
+/// Convert char index (wide char = 1) to cell column (wide char = 2 cols).
+pub fn char_index_to_cell_col(line: &[Cell], char_idx: usize) -> usize {
+    let mut col = 0;
+    let mut idx = 0;
+    while col < line.len() && idx < char_idx {
+        if line[col].flags.contains(CellFlags::WIDE_CHAR) {
+            col += 2;
+        } else {
+            col += 1;
+        }
+        idx += 1;
+    }
+    col
+}
+
+/// Get cell slice for an absolute row (scrollback + screen).
+pub fn row_cells_absolute(grid: &growterm_grid::Grid, abs_row: u32) -> Vec<Cell> {
+    let scrollback = grid.scrollback();
+    let screen = grid.cells();
+    let sb_len = scrollback.len() as u32;
+    if abs_row < sb_len {
+        scrollback[abs_row as usize].clone()
+    } else {
+        let screen_row = (abs_row - sb_len) as usize;
+        if screen_row >= screen.len() {
+            Vec::new()
+        } else {
+            screen[screen_row].clone()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -583,5 +630,44 @@ mod tests {
         // view_base=10, 24 visible rows -> selection starts before view
         let result = sel.screen_normalized(10, 24);
         assert_eq!(result, Some(((0, 0), (2, 5))));
+    }
+
+    #[test]
+    fn cell_col_to_char_index_ascii_only() {
+        // "hello" → all width-1, cell col == char index
+        let cells = make_cells_with_wide(&["hello"]);
+        assert_eq!(cell_col_to_char_index(&cells[0], 0), 0);
+        assert_eq!(cell_col_to_char_index(&cells[0], 3), 3);
+    }
+
+    #[test]
+    fn cell_col_to_char_index_with_wide() {
+        // "한글 hi" → cells: [한][spacer][글][spacer][ ][h][i]
+        // cell cols:          0    1       2    3     4   5  6
+        // char idx:           0            1         2   3  4
+        let cells = make_cells_with_wide(&["한글 hi"]);
+        assert_eq!(cell_col_to_char_index(&cells[0], 0), 0); // '한'
+        assert_eq!(cell_col_to_char_index(&cells[0], 2), 1); // '글'
+        assert_eq!(cell_col_to_char_index(&cells[0], 4), 2); // ' '
+        assert_eq!(cell_col_to_char_index(&cells[0], 5), 3); // 'h'
+        assert_eq!(cell_col_to_char_index(&cells[0], 6), 4); // 'i'
+    }
+
+    #[test]
+    fn char_index_to_cell_col_ascii_only() {
+        let cells = make_cells_with_wide(&["hello"]);
+        assert_eq!(char_index_to_cell_col(&cells[0], 0), 0);
+        assert_eq!(char_index_to_cell_col(&cells[0], 3), 3);
+    }
+
+    #[test]
+    fn char_index_to_cell_col_with_wide() {
+        // "한글 hi" → char 0='한' at col 0, char 1='글' at col 2, char 2=' ' at col 4
+        let cells = make_cells_with_wide(&["한글 hi"]);
+        assert_eq!(char_index_to_cell_col(&cells[0], 0), 0);
+        assert_eq!(char_index_to_cell_col(&cells[0], 1), 2);
+        assert_eq!(char_index_to_cell_col(&cells[0], 2), 4);
+        assert_eq!(char_index_to_cell_col(&cells[0], 3), 5);
+        assert_eq!(char_index_to_cell_col(&cells[0], 4), 6);
     }
 }

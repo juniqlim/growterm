@@ -204,7 +204,7 @@ pub fn spawn_ai_coaching(
             Some(c) => resolve_claude_in_command(&c),
             None => {
                 let claude_path = find_claude_path();
-                format!("{claude_path} --system '{default_system}' -p")
+                format!("{claude_path} --system-prompt '{default_system}' -p")
             }
         };
         let mut child = match std::process::Command::new("sh")
