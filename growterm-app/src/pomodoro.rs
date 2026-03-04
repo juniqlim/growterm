@@ -191,8 +191,9 @@ pub fn spawn_ai_coaching(
     std::thread::spawn(move || {
         use std::io::Write;
         let default_system = "아래는 터미널에서 25분간 작업한 내용입니다. 탭별로 구분되어 있습니다. \
-            이 작업 과정을 보고 짧은 코칭 피드백을 한국어로 3-4문장 이내로 주세요. \
-            집중도, 문제 해결 방식, 개선할 점 위주로 피드백하세요.";
+            당신은 코치입니다. 판단하거나 가르치지 마세요. \
+            관찰한 내용을 짧게 알려주고, 사용자가 미처 보지 못했을 부분을 질문으로 던져주세요. \
+            한국어로 3-4문장 이내로 답하세요.";
         let cmd = coaching_command.unwrap_or_else(|| {
             let claude_path = find_claude_path();
             format!("{claude_path} --system '{default_system}' -p")
@@ -250,34 +251,44 @@ fn save_coaching_file(dir: &std::path::Path, lines: &[String]) {
         eprintln!("Failed to create coaching dir: {e}");
         return;
     }
-    let filename = local_timestamp_filename();
-    let path = dir.join(filename);
-    let content = lines.join("\n");
-    if let Err(e) = std::fs::write(&path, &content) {
-        eprintln!("Failed to save coaching file: {e}");
+    let (date_filename, timestamp) = local_date_and_timestamp();
+    let path = dir.join(date_filename);
+    let mut entry = format!("\n## {timestamp}\n\n");
+    entry.push_str(&lines.join("\n"));
+    entry.push('\n');
+
+    use std::fs::OpenOptions;
+    use std::io::Write;
+    match OpenOptions::new().create(true).append(true).open(&path) {
+        Ok(mut f) => {
+            if let Err(e) = f.write_all(entry.as_bytes()) {
+                eprintln!("Failed to save coaching file: {e}");
+            }
+        }
+        Err(e) => eprintln!("Failed to save coaching file: {e}"),
     }
 }
 
-fn local_timestamp_filename() -> String {
+/// Returns (daily_filename, full_timestamp) e.g. ("20260304.md", "2026-03-04 13:11:51")
+fn local_date_and_timestamp() -> (String, String) {
     use std::process::Command;
-    // Use `date` command for local time formatting (no chrono dependency)
-    let output = Command::new("date")
-        .arg("+%Y%m%d_%H%M%S")
-        .output();
-    match output {
-        Ok(o) => {
-            let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
-            format!("{s}.md")
-        }
-        Err(_) => {
-            // Fallback: use Unix timestamp
+    let date_out = Command::new("date").arg("+%Y%m%d").output();
+    let ts_out = Command::new("date").arg("+%Y-%m-%d %H:%M:%S").output();
+    let date = date_out
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_else(|| {
             let secs = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs();
-            format!("{secs}.md")
-        }
-    }
+            secs.to_string()
+        });
+    let timestamp = ts_out
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_else(|| date.clone());
+    (format!("{date}.md"), timestamp)
 }
 
 #[cfg(test)]
@@ -477,7 +488,7 @@ mod tests {
     }
 
     #[test]
-    fn save_coaching_file_creates_md() {
+    fn save_coaching_file_creates_daily_md() {
         let dir = std::env::temp_dir().join(format!("growterm_test_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
 
@@ -497,8 +508,24 @@ mod tests {
         assert!(path.extension().unwrap() == "md");
 
         let content = std::fs::read_to_string(&path).unwrap();
+        // Should have timestamp header
+        assert!(content.contains("## "), "should have timestamp header");
         assert!(content.contains("좋은 집중력"));
         assert!(content.contains("커밋"));
+
+        // Save again — should append to same file, not create new one
+        let lines2 = vec!["두 번째 코칭입니다.".to_string()];
+        save_coaching_file(&dir, &lines2);
+
+        let entries2: Vec<_> = std::fs::read_dir(&dir)
+            .expect("dir should exist")
+            .filter_map(|e| e.ok())
+            .collect();
+        assert_eq!(entries2.len(), 1, "should still be one file per day");
+
+        let content2 = std::fs::read_to_string(&entries2[0].path()).unwrap();
+        assert!(content2.contains("좋은 집중력"), "first coaching should remain");
+        assert!(content2.contains("두 번째 코칭"), "second coaching should be appended");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
