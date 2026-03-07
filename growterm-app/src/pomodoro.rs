@@ -59,7 +59,6 @@ impl Pomodoro {
         self.enabled
     }
 
-    #[cfg(test)]
     pub fn phase(&self) -> Phase {
         self.phase
     }

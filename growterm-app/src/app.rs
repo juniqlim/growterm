@@ -7,6 +7,39 @@ use growterm_gpu_draw::GpuDrawer;
 use growterm_macos::{AppEvent, MacWindow, Modifiers};
 
 use crate::config::CopyModeAction;
+
+/// Freeze diagnostic logger — writes directly to ~/.config/growterm/freeze.log.
+/// Truncates the file every 200 lines to keep only recent events.
+struct FreezeLog {
+    file: std::fs::File,
+    path: std::path::PathBuf,
+    start: Instant,
+    lines: usize,
+}
+
+const FREEZE_LOG_MAX_LINES: usize = 200;
+
+impl FreezeLog {
+    fn new() -> Option<Self> {
+        let dir = crate::config::config_dir();
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("freeze.log");
+        let file = std::fs::File::create(&path).ok()?;
+        Some(Self { file, path, start: Instant::now(), lines: 0 })
+    }
+
+    fn log(&mut self, msg: &str) {
+        if self.lines >= FREEZE_LOG_MAX_LINES {
+            if let Ok(f) = std::fs::File::create(&self.path) {
+                self.file = f;
+                self.lines = 0;
+            }
+        }
+        let _ = writeln!(self.file, "[{:>8.3}] {}", self.start.elapsed().as_secs_f64(), msg);
+        let _ = self.file.flush();
+        self.lines += 1;
+    }
+}
 use crate::copy_mode::CopyMode;
 use crate::ink_workaround::InkImeState;
 use crate::pomodoro::{Pomodoro, TickResult};
@@ -191,7 +224,10 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
         };
     }
 
+    let mut flog = FreezeLog::new();
+
     loop {
+        if let Some(f) = flog.as_mut() { f.log("waiting_event"); }
         let event = if let Some(evt) = deferred.take() {
             evt
         } else {
@@ -200,6 +236,20 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                 Err(_) => break,
             }
         };
+        let event_name = match &event {
+            AppEvent::TextCommit(_) => "TextCommit",
+            AppEvent::Preedit(_) => "Preedit",
+            AppEvent::KeyInput { .. } => "KeyInput",
+            AppEvent::RedrawRequested => "Redraw",
+            AppEvent::Resize(_, _) => "Resize",
+            _ => "Other",
+        };
+        // Log all events during break; only non-Redraw events otherwise
+        if let Some(f) = flog.as_mut() {
+            if pomodoro.is_input_blocked() || event_name != "Redraw" {
+                f.log(&format!("event:{} phase:{:?}", event_name, pomodoro.phase()));
+            }
+        }
         let has_scrollback = tabs.active_tab()
             .map(|t| t.terminal.lock().unwrap().grid.scrollback_len() > 0)
             .unwrap_or(false);
@@ -853,10 +903,13 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                         copy_flash = None;
                     }
                 }
-                if pomodoro.tick() == TickResult::StartedBreak {
+                let tick_result = pomodoro.tick();
+                if tick_result == TickResult::StartedBreak {
+                    if let Some(f) = flog.as_mut() { f.log("break_started"); }
                     if coaching_enabled {
                         let tab_text = extract_pomodoro_tab_text(&tabs, &pomodoro);
                         if !tab_text.trim().is_empty() {
+                            if let Some(f) = flog.as_mut() { f.log(&format!("spawn_coaching text_len:{}", tab_text.len())); }
                             let ai_handle = pomodoro.ai_response_handle();
                             crate::pomodoro::spawn_ai_coaching(tab_text, ai_handle, config.coaching_command.clone());
                         } else {
@@ -878,6 +931,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     .active_tab()
                     .map_or(false, |t| t.sync_output.load(Ordering::Relaxed));
                 if in_sync {
+                    if let Some(f) = flog.as_mut() { f.log("skip_sync_output"); }
                     continue;
                 }
                 let was_dirty = tabs
@@ -890,7 +944,9 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                 // Update window title with pomodoro + global avg
                 let title = build_title(&pomodoro, &tabs);
                 window.set_title(&title);
+                if let Some(f) = flog.as_mut() { f.log("render_start"); }
                 do_render!();
+                if let Some(f) = flog.as_mut() { f.log("render_done"); }
                 if was_dirty || preedit_changed {
                     if let Some(ref path) = grid_dump_path {
                         let dump_file = std::path::Path::new(path);

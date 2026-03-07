@@ -1065,6 +1065,16 @@ impl GpuDrawer {
             return region;
         }
 
+        // Apply the same per-frame glyph budget as ensure_glyph_in_atlas.
+        if self.new_glyphs_this_frame >= MAX_NEW_GLYPHS_PER_FRAME {
+            self.glyph_budget_exceeded = true;
+            return GlyphRegion {
+                u0: 0.0, v0: 0.0, u1: 0.0, v1: 0.0,
+                width: 0, height: 0, offset_x: 0.0, offset_y: 0.0,
+            };
+        }
+        self.new_glyphs_this_frame += 1;
+
         let glyph = self.tab_atlas.get_or_insert(c);
         let w = glyph.width;
         let h = glyph.height;
