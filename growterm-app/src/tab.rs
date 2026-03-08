@@ -1,4 +1,5 @@
-use std::io::Read;
+use std::io::{Read, Write};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -44,6 +45,26 @@ pub struct TabManager {
 pub struct TabBarInfo {
     pub titles: Vec<String>,
     pub active_index: usize,
+}
+
+fn vt_capture_path_from_env_with(
+    value: Option<std::ffi::OsString>,
+) -> Option<PathBuf> {
+    let path = value?;
+    if path.is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(path))
+    }
+}
+
+fn open_vt_capture_file() -> Option<std::fs::File> {
+    let path = vt_capture_path_from_env_with(std::env::var_os("GROWTERM_VT_CAPTURE"))?;
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .ok()
 }
 
 /// Tab bar top Y position — independent of scrollback state.
@@ -166,13 +187,10 @@ impl TabManager {
         self.tabs.len() > 1
     }
 
-    /// Terminal rows adjusted for tab bar presence.
-    pub fn term_rows(&self, screen_h: u32, cell_h: f32, tab_bar_h: f32) -> u16 {
-        if self.show_tab_bar() {
-            ((screen_h as f32 - tab_bar_h) / cell_h).floor().max(1.0) as u16
-        } else {
-            (screen_h as f32 / cell_h).floor().max(1.0) as u16
-        }
+    /// Terminal rows adjusted for title/tab bar offsets.
+    pub fn term_rows(&self, screen_h: u32, cell_h: f32, tab_bar_h: f32, title_bar_h: f32) -> u16 {
+        let y_off = content_y_offset(self.show_tab_bar(), tab_bar_h, title_bar_h, false);
+        ((screen_h as f32 - y_off) / cell_h).floor().max(1.0) as u16
     }
 
     /// Y pixel offset for mouse events — mirrors renderer y_off logic.
@@ -319,6 +337,7 @@ fn start_io_thread(
 ) {
     std::thread::spawn(move || {
         let mut buf = [0u8; 65536];
+        let mut vt_capture = open_vt_capture_file();
         let mut pending_queries: Vec<u8> = Vec::new();
         let mut kitty_keyboard_flags: u16 = 0;
         let mut kitty_keyboard_stack: Vec<u16> = Vec::new();
@@ -327,6 +346,10 @@ fn start_io_thread(
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
+                    if let Some(file) = vt_capture.as_mut() {
+                        let _ = file.write_all(&buf[..n]);
+                        let _ = file.flush();
+                    }
                     *last_pty_output_at.lock().unwrap() = Some(Instant::now());
                     pending_queries.extend_from_slice(&buf[..n]);
                     let controls = extract_terminal_controls(&mut pending_queries);
@@ -889,6 +912,23 @@ mod tests {
     }
 
     #[test]
+    fn vt_capture_path_from_env_ignores_empty() {
+        assert_eq!(vt_capture_path_from_env_with(None), None);
+        assert_eq!(
+            vt_capture_path_from_env_with(Some(std::ffi::OsString::from(""))),
+            None
+        );
+    }
+
+    #[test]
+    fn vt_capture_path_from_env_returns_path() {
+        let path = vt_capture_path_from_env_with(Some(std::ffi::OsString::from(
+            "/tmp/codex-resume.vt",
+        )));
+        assert_eq!(path, Some(PathBuf::from("/tmp/codex-resume.vt")));
+    }
+
+    #[test]
     fn content_y_offset_opaque_with_tab_bar() {
         assert_eq!(content_y_offset(true, TAB_BAR_H, 0.0, false), TAB_BAR_H);
         assert_eq!(content_y_offset(true, TAB_BAR_H, 0.0, true), TAB_BAR_H);
@@ -1347,6 +1387,28 @@ mod tests {
         mgr.add_tab(dummy_tab());
         mgr.add_tab(dummy_tab());
         assert_eq!(mgr.mouse_y_offset(30.0, 50.0, true), 80.0);
+    }
+
+    #[test]
+    fn term_rows_opaque_without_tab_bar_uses_full_height() {
+        let mut mgr = TabManager::new();
+        mgr.add_tab(dummy_tab());
+        assert_eq!(mgr.term_rows(600, 20.0, 30.0, 0.0), 30);
+    }
+
+    #[test]
+    fn term_rows_transparent_without_tab_bar_excludes_title_bar() {
+        let mut mgr = TabManager::new();
+        mgr.add_tab(dummy_tab());
+        assert_eq!(mgr.term_rows(600, 20.0, 30.0, 60.0), 27);
+    }
+
+    #[test]
+    fn term_rows_transparent_with_tab_bar_excludes_title_and_tab_bar() {
+        let mut mgr = TabManager::new();
+        mgr.add_tab(dummy_tab());
+        mgr.add_tab(dummy_tab());
+        assert_eq!(mgr.term_rows(600, 20.0, 30.0, 60.0), 25);
     }
 
 

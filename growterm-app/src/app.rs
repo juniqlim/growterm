@@ -135,11 +135,17 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
     let mut font_size = config.font_size;
     let (width, height) = window.inner_size();
 
-    let (cols, rows) = zoom::calc_grid_size(width, height, cell_w, cell_h);
+    let cols = (width as f32 / cell_w).floor().max(1.0) as u16;
 
     let mut tabs = TabManager::new();
 
     // Spawn initial tab (no tab bar for single tab)
+    let initial_title_bar_height = if config.transparent_tab_bar {
+        window.title_bar_height() as f32
+    } else {
+        0.0
+    };
+    let rows = tabs.term_rows(height, cell_h, drawer.tab_bar_height(), initial_title_bar_height);
     match Tab::spawn(rows, cols, window.clone()) {
         Ok(tab) => {
             tabs.add_tab(tab);
@@ -312,7 +318,12 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                         let (cols, _rows) = zoom::calc_grid_size(w, h, cw, ch);
                         let had_no_tab_bar = !tabs.show_tab_bar();
                         // After adding a tab, tab bar will show — compute rows with tab bar
-                        let term_rows = ((h as f32 - drawer.tab_bar_height()) / ch).floor().max(1.0) as u16;
+                        let next_title_bar_height = if transparent_tab_bar {
+                            title_bar_height
+                        } else {
+                            0.0
+                        };
+                        let term_rows = tabs.term_rows(h, ch, drawer.tab_bar_height(), next_title_bar_height);
                         let active_cwd = tabs
                             .active_tab()
                             .and_then(|t| t.pty_writer.child_pid())
@@ -356,7 +367,8 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                         if had_tab_bar && !tabs.show_tab_bar() {
                             let (cw, ch) = drawer.cell_size();
                             let (w, h) = window.inner_size();
-                            let (cols, rows) = zoom::calc_grid_size(w, h, cw, ch);
+                            let cols = (w as f32 / cw).floor().max(1.0) as u16;
+                            let rows = tabs.term_rows(h, ch, drawer.tab_bar_height(), title_bar_height);
                             if let Some(t) = tabs.active_tab_mut() {
                                 let mut st = t.terminal.lock().unwrap();
                                 st.grid.resize(cols, rows);
@@ -525,8 +537,8 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                         drawer.set_font_size(font_size);
                         let (cw, ch) = drawer.cell_size();
                         let (w, h) = window.inner_size();
-                        let (cols, _rows) = zoom::calc_grid_size(w, h, cw, ch);
-                        let term_rows = tabs.term_rows(h, ch, drawer.tab_bar_height());
+                        let cols = (w as f32 / cw).floor().max(1.0) as u16;
+                        let term_rows = tabs.term_rows(h, ch, drawer.tab_bar_height(), title_bar_height);
                         resize_all_tabs(&mut tabs, cols, term_rows);
                         do_render!();
                         continue;
@@ -891,8 +903,8 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                 }
                 drawer.resize(w, h);
                 let (cw, ch) = drawer.cell_size();
-                let (cols, _rows) = zoom::calc_grid_size(w, h, cw, ch);
-                let term_rows = tabs.term_rows(h, ch, drawer.tab_bar_height());
+                let cols = (w as f32 / cw).floor().max(1.0) as u16;
+                let term_rows = tabs.term_rows(h, ch, drawer.tab_bar_height(), title_bar_height);
                 resize_all_tabs(&mut tabs, cols, term_rows);
                 do_render!();
             }
@@ -1077,8 +1089,8 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     drawer.set_font(font_path.as_deref(), font_size);
                     let (cw, ch) = drawer.cell_size();
                     let (w, h) = window.inner_size();
-                    let (cols, _rows) = zoom::calc_grid_size(w, h, cw, ch);
-                    let term_rows = tabs.term_rows(h, ch, drawer.tab_bar_height());
+                    let cols = (w as f32 / cw).floor().max(1.0) as u16;
+                    let term_rows = tabs.term_rows(h, ch, drawer.tab_bar_height(), title_bar_height);
                     resize_all_tabs(&mut tabs, cols, term_rows);
                 }
                 // Apply pomodoro time changes
