@@ -42,6 +42,7 @@ pub struct Grid {
     cursor_visible: bool,
     scroll_region_top: usize,
     scroll_region_bottom: usize,
+    saved_cursor: Option<(usize, usize)>,
     saved_screen: Option<SavedScreen>,
     in_alt_screen: bool,
 }
@@ -64,6 +65,7 @@ impl Grid {
             cursor_visible: true,
             scroll_region_top: 0,
             scroll_region_bottom: rows,
+            saved_cursor: None,
             saved_screen: None,
             in_alt_screen: false,
         }
@@ -121,6 +123,7 @@ impl Grid {
                 self.current_flags = CellFlags::empty();
             }
             TerminalCommand::Newline => self.newline(),
+            TerminalCommand::ReverseIndex => self.reverse_index(),
             TerminalCommand::CarriageReturn => self.cursor_col = 0,
             TerminalCommand::Backspace => {
                 self.cursor_col = self.cursor_col.saturating_sub(1);
@@ -146,6 +149,13 @@ impl Grid {
             }
             TerminalCommand::CursorRow(row) => {
                 self.cursor_row = (*row as usize).saturating_sub(1).min(self.rows - 1);
+            }
+            TerminalCommand::SaveCursor => self.saved_cursor = Some((self.cursor_row, self.cursor_col)),
+            TerminalCommand::RestoreCursor => {
+                if let Some((row, col)) = self.saved_cursor {
+                    self.cursor_row = row.min(self.rows - 1);
+                    self.cursor_col = col.min(self.cols - 1);
+                }
             }
             TerminalCommand::SetScrollRegion { top, bottom } => {
                 self.set_scroll_region(*top, *bottom);
@@ -244,6 +254,15 @@ impl Grid {
             self.scroll_region_up(1);
         } else if self.cursor_row + 1 < self.rows {
             self.cursor_row += 1;
+        }
+    }
+
+    fn reverse_index(&mut self) {
+        let top = self.scroll_region_top;
+        if self.cursor_row == top {
+            self.scroll_region_down(1);
+        } else {
+            self.cursor_row = self.cursor_row.saturating_sub(1);
         }
     }
 

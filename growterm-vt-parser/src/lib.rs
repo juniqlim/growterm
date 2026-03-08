@@ -155,6 +155,18 @@ impl vte::Perform for Handler {
         self.commands.push(cmd);
     }
 
+    fn esc_dispatch(&mut self, intermediates: &[u8], _ignore: bool, byte: u8) {
+        if !intermediates.is_empty() {
+            return;
+        }
+        match byte {
+            b'M' => self.commands.push(TerminalCommand::ReverseIndex),
+            b'7' => self.commands.push(TerminalCommand::SaveCursor),
+            b'8' => self.commands.push(TerminalCommand::RestoreCursor),
+            _ => {}
+        }
+    }
+
     fn csi_dispatch(
         &mut self,
         params: &vte::Params,
@@ -232,6 +244,8 @@ impl vte::Perform for Handler {
             'd' => self
                 .commands
                 .push(TerminalCommand::CursorRow(first.max(1))),
+            's' => self.commands.push(TerminalCommand::SaveCursor),
+            'u' => self.commands.push(TerminalCommand::RestoreCursor),
             'r' => {
                 let mut p = params.iter();
                 let top = p.next().map(|v| v[0]).unwrap_or(0);
@@ -389,6 +403,37 @@ mod tests {
             cmds,
             vec![TerminalCommand::CursorUp(3), TerminalCommand::CarriageReturn]
         );
+    }
+
+    #[test]
+    fn parse_csi_save_cursor() {
+        let mut parser = VtParser::new();
+        let cmds = parser.parse(b"\x1b[s");
+        assert_eq!(cmds, vec![TerminalCommand::SaveCursor]);
+    }
+
+    #[test]
+    fn parse_csi_restore_cursor() {
+        let mut parser = VtParser::new();
+        let cmds = parser.parse(b"\x1b[u");
+        assert_eq!(cmds, vec![TerminalCommand::RestoreCursor]);
+    }
+
+    #[test]
+    fn parse_dec_save_restore_cursor() {
+        let mut parser = VtParser::new();
+        let cmds = parser.parse(b"\x1b7\x1b8");
+        assert_eq!(
+            cmds,
+            vec![TerminalCommand::SaveCursor, TerminalCommand::RestoreCursor]
+        );
+    }
+
+    #[test]
+    fn parse_reverse_index() {
+        let mut parser = VtParser::new();
+        let cmds = parser.parse(b"\x1bM");
+        assert_eq!(cmds, vec![TerminalCommand::ReverseIndex]);
     }
 
     #[test]

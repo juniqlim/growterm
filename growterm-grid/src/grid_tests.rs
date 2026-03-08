@@ -460,6 +460,36 @@ fn erase_in_display_cursor_to_end() {
 }
 
 #[test]
+fn reverse_index_moves_cursor_up() {
+    let mut grid = Grid::new(5, 3);
+    grid.apply(&TerminalCommand::CursorPosition { row: 3, col: 1 });
+    grid.apply(&TerminalCommand::ReverseIndex);
+    grid.apply(&TerminalCommand::Print('X'));
+    assert_eq!(grid.cells()[1][0].character, 'X');
+}
+
+#[test]
+fn reverse_index_at_top_of_scroll_region_scrolls_region_down() {
+    let mut grid = Grid::new(5, 4);
+    for (r, ch) in ['A', 'B', 'C', 'D'].iter().enumerate() {
+        grid.apply(&TerminalCommand::CursorPosition { row: r as u16 + 1, col: 1 });
+        for _ in 0..5 {
+            grid.apply(&TerminalCommand::Print(*ch));
+        }
+    }
+    grid.apply(&TerminalCommand::SetScrollRegion { top: 2, bottom: 4 });
+    grid.apply(&TerminalCommand::CursorPosition { row: 2, col: 1 });
+    grid.apply(&TerminalCommand::ReverseIndex);
+
+    let row1: String = grid.cells()[1].iter().map(|c| c.character).collect();
+    let row2: String = grid.cells()[2].iter().map(|c| c.character).collect();
+    let row3: String = grid.cells()[3].iter().map(|c| c.character).collect();
+    assert_eq!(row1.trim_end(), "");
+    assert_eq!(row2.trim_end(), "BBBBB");
+    assert_eq!(row3.trim_end(), "CCCCC");
+}
+
+#[test]
 fn erase_in_display_start_to_cursor() {
     let mut grid = Grid::new(5, 3);
     for r in 0..3 {
@@ -1101,6 +1131,17 @@ fn cursor_row_moves_to_row() {
     grid.apply(&TerminalCommand::Print('Y'));
     // Row should be 9 (10-1), col should stay at 4
     assert_eq!(grid.cells()[9][4].character, 'Y');
+}
+
+#[test]
+fn save_and_restore_cursor_returns_to_saved_position() {
+    let mut grid = Grid::new(10, 5);
+    grid.apply(&TerminalCommand::CursorPosition { row: 2, col: 3 });
+    grid.apply(&TerminalCommand::SaveCursor);
+    grid.apply(&TerminalCommand::CursorPosition { row: 5, col: 9 });
+    grid.apply(&TerminalCommand::RestoreCursor);
+    grid.apply(&TerminalCommand::Print('X'));
+    assert_eq!(grid.cells()[1][2].character, 'X');
 }
 
 // === Insert/Delete Lines ===
