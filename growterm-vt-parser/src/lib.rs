@@ -187,6 +187,15 @@ impl vte::Perform for Handler {
             'D' => self
                 .commands
                 .push(TerminalCommand::CursorBack(first.max(1))),
+            'E' => {
+                self.commands
+                    .push(TerminalCommand::CursorDown(first.max(1)));
+                self.commands.push(TerminalCommand::CarriageReturn);
+            }
+            'F' => {
+                self.commands.push(TerminalCommand::CursorUp(first.max(1)));
+                self.commands.push(TerminalCommand::CarriageReturn);
+            }
             'H' | 'f' => {
                 let mut p = params.iter();
                 let row = p.next().map(|v| v[0]).unwrap_or(0).max(1);
@@ -360,6 +369,26 @@ mod tests {
         let mut parser = VtParser::new();
         let cmds = parser.parse(b"\x1b[4D");
         assert_eq!(cmds, vec![TerminalCommand::CursorBack(4)]);
+    }
+
+    #[test]
+    fn parse_cursor_next_line() {
+        let mut parser = VtParser::new();
+        let cmds = parser.parse(b"\x1b[2E");
+        assert_eq!(
+            cmds,
+            vec![TerminalCommand::CursorDown(2), TerminalCommand::CarriageReturn]
+        );
+    }
+
+    #[test]
+    fn parse_cursor_previous_line() {
+        let mut parser = VtParser::new();
+        let cmds = parser.parse(b"\x1b[3F");
+        assert_eq!(
+            cmds,
+            vec![TerminalCommand::CursorUp(3), TerminalCommand::CarriageReturn]
+        );
     }
 
     #[test]

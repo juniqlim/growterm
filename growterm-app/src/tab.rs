@@ -1257,6 +1257,20 @@ mod tests {
     }
 
     #[test]
+    fn extract_terminal_controls_detects_sync_sequences_amid_text() {
+        let mut pending = b"abc\x1b[?2026hdef\x1b[?2026lghi".to_vec();
+        let controls = extract_terminal_controls(&mut pending);
+        assert_eq!(
+            controls,
+            vec![
+                TerminalControl::SyncOutputBegin,
+                TerminalControl::SyncOutputEnd,
+            ]
+        );
+        assert!(pending.is_empty());
+    }
+
+    #[test]
     fn extract_terminal_controls_detects_osc_color_set_sequences() {
         let mut pending = b"\x1b]10;rgb:ffff/0000/0000\x07\x1b]11;#112233\x1b\\".to_vec();
         let controls = extract_terminal_controls(&mut pending);

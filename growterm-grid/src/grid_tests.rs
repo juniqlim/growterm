@@ -912,6 +912,73 @@ fn leave_alt_screen_restores() {
 }
 
 #[test]
+fn erase_entire_display_clears_wide_chars_without_leaving_fragments() {
+    let mut grid = Grid::new(6, 2);
+
+    grid.apply(&TerminalCommand::Print('한'));
+    grid.apply(&TerminalCommand::Print('A'));
+    grid.apply(&TerminalCommand::CursorPosition { row: 2, col: 1 });
+    grid.apply(&TerminalCommand::Print('B'));
+    grid.apply(&TerminalCommand::Print('글'));
+
+    grid.apply(&TerminalCommand::EraseInDisplay(2));
+
+    for row in grid.cells() {
+        for cell in row {
+            assert_eq!(cell.character, ' ');
+            assert!(cell.flags.is_empty());
+        }
+    }
+    assert_eq!(grid.cursor_pos(), (1, 3));
+}
+
+#[test]
+fn codex_style_full_redraw_replaces_old_screen_contents_cleanly() {
+    let mut grid = Grid::new(8, 3);
+
+    for ch in "stale".chars() {
+        grid.apply(&TerminalCommand::Print(ch));
+    }
+    grid.apply(&TerminalCommand::CursorPosition { row: 2, col: 1 });
+    grid.apply(&TerminalCommand::Print('한'));
+    grid.apply(&TerminalCommand::Print('X'));
+
+    grid.apply(&TerminalCommand::CursorPosition { row: 1, col: 1 });
+    grid.apply(&TerminalCommand::EraseInDisplay(2));
+    grid.apply(&TerminalCommand::CursorPosition { row: 1, col: 1 });
+
+    for ch in "OK".chars() {
+        grid.apply(&TerminalCommand::Print(ch));
+    }
+    grid.apply(&TerminalCommand::CursorPosition { row: 2, col: 1 });
+    grid.apply(&TerminalCommand::Print('한'));
+    grid.apply(&TerminalCommand::Print('글'));
+
+    assert_eq!(grid.cells()[0][0].character, 'O');
+    assert_eq!(grid.cells()[0][1].character, 'K');
+    assert_eq!(grid.cells()[0][2].character, ' ');
+    assert_eq!(grid.cells()[1][0].character, '한');
+    assert!(grid.cells()[1][0].flags.contains(CellFlags::WIDE_CHAR));
+    assert_eq!(grid.cells()[1][1].character, ' ');
+    assert_eq!(grid.cells()[1][2].character, '글');
+    assert!(grid.cells()[1][2].flags.contains(CellFlags::WIDE_CHAR));
+    assert_eq!(grid.cells()[1][3].character, ' ');
+
+    for row in [0usize, 1, 2] {
+        for col in 0..8 {
+            if matches!((row, col), (0, 0 | 1) | (1, 0 | 2)) {
+                continue;
+            }
+            assert_eq!(
+                grid.cells()[row][col].character,
+                ' ',
+                "stale cell remained at row={row} col={col}"
+            );
+        }
+    }
+}
+
+#[test]
 fn alt_screen_without_scroll_preserves_original_scrollback() {
     let mut grid = Grid::new(5, 2);
     // Push to scrollback
