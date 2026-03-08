@@ -574,6 +574,20 @@ impl GpuDrawer {
         // Build glyph vertices
         let mut glyph_vertices: Vec<GlyphVertex> = Vec::new();
 
+        // Preload glyphs for lower rows first so the input/status area is not
+        // starved by large body updates when the per-frame glyph budget is low.
+        for idx in prioritized_glyph_command_indices(commands) {
+            let cmd = &commands[idx];
+            let ch = cmd.character;
+            if ch >= '\u{2500}' && ch <= '\u{257F}' {
+                continue;
+            }
+            if ch >= '\u{2580}' && ch <= '\u{259F}' && !(ch >= '\u{2591}' && ch <= '\u{2593}') {
+                continue;
+            }
+            let _ = self.ensure_glyph_in_atlas(ch);
+        }
+
         // Helper: push a fg-colored rectangle into bg_vertices
         let push_rect =
             |bg_verts: &mut Vec<BgVertex>, x: f32, y: f32, w: f32, h: f32, color: [f32; 4]| {
@@ -1384,9 +1398,36 @@ fn box_drawing_segments(ch: char) -> Option<BoxSegments> {
     }
 }
 
+fn prioritized_glyph_command_indices(commands: &[RenderCommand]) -> Vec<usize> {
+    let mut indexed: Vec<(usize, u16)> = commands
+        .iter()
+        .enumerate()
+        .filter(|(_, cmd)| cmd.character != ' ' && !cmd.flags.contains(CellFlags::HIDDEN))
+        .map(|(idx, cmd)| (idx, cmd.row))
+        .collect();
+    indexed.sort_by(|(lhs_idx, lhs_row), (rhs_idx, rhs_row)| {
+        rhs_row
+            .cmp(lhs_row)
+            .then_with(|| lhs_idx.cmp(rhs_idx))
+    });
+    indexed.into_iter().map(|(idx, _)| idx).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use growterm_types::RenderCommand;
+
+    fn command(row: u16, col: u16, character: char) -> RenderCommand {
+        RenderCommand {
+            col,
+            row,
+            character,
+            fg: Rgb::new(255, 255, 255),
+            bg: Rgb::new(0, 0, 0),
+            flags: CellFlags::empty(),
+        }
+    }
 
     #[test]
     fn supported_block_element_uses_rect_path() {
@@ -1418,5 +1459,30 @@ mod tests {
         );
         assert!(!handled);
         assert!(vertices.is_empty());
+    }
+
+    #[test]
+    fn prioritized_glyph_commands_prefer_lower_rows() {
+        let commands = vec![
+            command(0, 0, 'A'),
+            command(4, 0, 'B'),
+            command(2, 0, 'C'),
+            command(4, 1, 'D'),
+        ];
+
+        let order = prioritized_glyph_command_indices(&commands);
+
+        assert_eq!(order, vec![1, 3, 2, 0]);
+    }
+
+    #[test]
+    fn prioritized_glyph_commands_skip_blank_and_hidden_cells() {
+        let mut hidden = command(5, 0, 'X');
+        hidden.flags = CellFlags::HIDDEN;
+        let commands = vec![command(1, 0, ' '), hidden, command(3, 0, 'P')];
+
+        let order = prioritized_glyph_command_indices(&commands);
+
+        assert_eq!(order, vec![2]);
     }
 }
