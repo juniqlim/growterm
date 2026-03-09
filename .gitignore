@@ -1,2 +1,4 @@
 /target
+/growterm-integration-tests/target
+/growterm-integration-tests/Cargo.lock
 .idea/
