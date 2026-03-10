@@ -188,8 +188,16 @@ impl TabManager {
     }
 
     /// Terminal rows adjusted for title/tab bar offsets.
+    /// In transparent mode, use full screen height (no title bar subtraction)
+    /// so content fills the entire screen when drawn from y=0.
     pub fn term_rows(&self, screen_h: u32, cell_h: f32, tab_bar_h: f32, title_bar_h: f32) -> u16 {
-        let y_off = content_y_offset(self.show_tab_bar(), tab_bar_h, title_bar_h, false);
+        let transparent = title_bar_h > 0.0;
+        let y_off = if transparent {
+            // Only subtract tab bar height when visible; title bar is overlaid
+            if self.show_tab_bar() { tab_bar_h } else { 0.0 }
+        } else {
+            content_y_offset(self.show_tab_bar(), tab_bar_h, title_bar_h, false)
+        };
         ((screen_h as f32 - y_off) / cell_h).floor().max(1.0) as u16
     }
 
@@ -1397,18 +1405,20 @@ mod tests {
     }
 
     #[test]
-    fn term_rows_transparent_without_tab_bar_excludes_title_bar() {
+    fn term_rows_transparent_without_tab_bar_uses_full_height() {
         let mut mgr = TabManager::new();
         mgr.add_tab(dummy_tab());
-        assert_eq!(mgr.term_rows(600, 20.0, 30.0, 60.0), 27);
+        // Transparent mode: no title bar subtraction, full screen rows
+        assert_eq!(mgr.term_rows(600, 20.0, 30.0, 60.0), 30);
     }
 
     #[test]
-    fn term_rows_transparent_with_tab_bar_excludes_title_and_tab_bar() {
+    fn term_rows_transparent_with_tab_bar_excludes_only_tab_bar() {
         let mut mgr = TabManager::new();
         mgr.add_tab(dummy_tab());
         mgr.add_tab(dummy_tab());
-        assert_eq!(mgr.term_rows(600, 20.0, 30.0, 60.0), 25);
+        // Transparent mode: only tab bar subtracted, not title bar
+        assert_eq!(mgr.term_rows(600, 20.0, 30.0, 60.0), 28);
     }
 
 
