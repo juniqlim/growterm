@@ -35,6 +35,7 @@ pub struct Ivars {
     sender: RefCell<Option<Sender<AppEvent>>>,
     ime_state: Cell<ImeState>,
     marked_text: RefCell<String>,
+    ime_cursor_rect: RefCell<Option<NSRect>>,
     current_event: RefCell<Option<Retained<NSEvent>>>,
     pending_resize: Cell<Option<(u32, u32)>>,
     last_mouse_pos: Cell<(f64, f64)>,
@@ -101,6 +102,15 @@ define_class! {
             if self.ivars().copy_mode_bypass_ime.get() {
                 self.dispatch_key_event(event);
                 return;
+            }
+
+            let cleared_stale_marked_text = {
+                let mut marked = self.ivars().marked_text.borrow_mut();
+                clear_stale_marked_text(&mut marked)
+            };
+            if cleared_stale_marked_text {
+                self.send_event(AppEvent::Preedit(String::new()));
+                self.discard_marked_text_from_input_context();
             }
 
             self.ivars().ime_state.set(ImeState::None);
@@ -332,8 +342,13 @@ define_class! {
 
         #[unsafe(method(unmarkText))]
         fn unmark_text(&self) {
-            self.ivars().marked_text.replace(String::new());
-            self.send_event(AppEvent::Preedit(String::new()));
+            let cleared = {
+                let mut marked = self.ivars().marked_text.borrow_mut();
+                clear_stale_marked_text(&mut marked)
+            };
+            if cleared {
+                self.send_event(AppEvent::Preedit(String::new()));
+            }
         }
 
         #[unsafe(method(hasMarkedText))]
@@ -372,11 +387,28 @@ define_class! {
             _actual_range: NSRangePointer,
         ) -> NSRect {
             if let Some(window) = self.window() {
-                let frame = window.frame();
-                NSRect::new(
-                    NSPoint::new(frame.origin.x, frame.origin.y),
-                    objc2_foundation::NSSize::new(0.0, 0.0),
-                )
+                if let Some(backing_rect) = *self.ivars().ime_cursor_rect.borrow() {
+                    let scale = self.backing_scale_factor();
+                    let local_rect = NSRect::new(
+                        NSPoint::new(backing_rect.origin.x / scale, backing_rect.origin.y / scale),
+                        objc2_foundation::NSSize::new(
+                            backing_rect.size.width / scale,
+                            backing_rect.size.height / scale,
+                        ),
+                    );
+                    let nil_view: *const AnyObject = std::ptr::null();
+                    let window_rect: NSRect =
+                        unsafe { msg_send![self, convertRect: local_rect, toView: nil_view] };
+                    let screen_rect: NSRect =
+                        unsafe { msg_send![&window, convertRectToScreen: window_rect] };
+                    screen_rect
+                } else {
+                    let frame = window.frame();
+                    NSRect::new(
+                        NSPoint::new(frame.origin.x, frame.origin.y),
+                        objc2_foundation::NSSize::new(0.0, 0.0),
+                    )
+                }
             } else {
                 NSRect::ZERO
             }
@@ -401,6 +433,7 @@ impl TerminalView {
             sender: RefCell::new(None),
             ime_state: Cell::new(ImeState::None),
             marked_text: RefCell::new(String::new()),
+            ime_cursor_rect: RefCell::new(None),
             current_event: RefCell::new(None),
             pending_resize: Cell::new(None),
             last_mouse_pos: Cell::new((0.0, 0.0)),
@@ -443,6 +476,10 @@ impl TerminalView {
 
     pub(crate) fn set_copy_mode_bypass_ime(&self, enabled: bool) {
         self.ivars().copy_mode_bypass_ime.set(enabled);
+    }
+
+    pub(crate) fn set_ime_cursor_rect(&self, rect: Option<NSRect>) {
+        self.ivars().ime_cursor_rect.replace(rect);
     }
 
     fn send_event(&self, event: AppEvent) {
@@ -499,6 +536,16 @@ impl TerminalView {
         self.window()
             .map(|w| w.backingScaleFactor())
             .unwrap_or(2.0)
+    }
+
+    fn discard_marked_text_from_input_context(&self) {
+        let view = self as *const Self as *const AnyObject;
+        unsafe {
+            let ctx: *const AnyObject = msg_send![view, inputContext];
+            if !ctx.is_null() {
+                let _: () = msg_send![ctx, discardMarkedText];
+            }
+        }
     }
 }
 
@@ -567,6 +614,15 @@ fn parse_file_url_lines(input: &str) -> Vec<String> {
         .map(url_string_to_path)
         .filter(|s| !s.is_empty())
         .collect()
+}
+
+fn clear_stale_marked_text(marked_text: &mut String) -> bool {
+    if marked_text.is_empty() {
+        false
+    } else {
+        marked_text.clear();
+        true
+    }
 }
 
 fn percent_decode(s: &str) -> String {
@@ -671,6 +727,26 @@ mod tests {
             resolve_file_url("file:///Users/me/%ED%95%9C%EA%B8%80.txt"),
             "/Users/me/한글.txt"
         );
+    }
+
+    #[test]
+    fn clear_stale_marked_text_noop_when_empty() {
+        let mut marked = String::new();
+
+        let cleared = clear_stale_marked_text(&mut marked);
+
+        assert!(!cleared);
+        assert!(marked.is_empty());
+    }
+
+    #[test]
+    fn clear_stale_marked_text_clears_existing_text() {
+        let mut marked = "한글".to_string();
+
+        let cleared = clear_stale_marked_text(&mut marked);
+
+        assert!(cleared);
+        assert!(marked.is_empty());
     }
 }
 

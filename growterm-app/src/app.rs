@@ -216,6 +216,8 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
     const COPY_FLASH_DURATION: Duration = Duration::from_millis(150);
     let mut tab_dragging: Option<usize> = None;
     let mut tab_drag_start_x: f32 = 0.0;
+    let mut last_title: Option<String> = None;
+    let mut last_ime_cursor_rect: Option<(f32, f32, f32, f32)> = None;
 
     macro_rules! do_render {
         () => {
@@ -953,9 +955,41 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                 if preedit_changed {
                     prev_preedit = preedit.clone();
                 }
+                let (cw, ch) = drawer.cell_size();
+                let next_ime_cursor_rect = tabs.active_tab().and_then(|tab| {
+                    let state = tab.terminal.lock().unwrap();
+                    let scrolled = state.grid.scroll_offset() > 0;
+                    let cursor = if scrolled || !state.grid.cursor_visible() {
+                        None
+                    } else {
+                        Some(state.grid.cursor_pos())
+                    };
+                    let preedit_pos_override = if preedit.is_empty() || scrolled {
+                        None
+                    } else {
+                        let visible = state.grid.visible_cells();
+                        ink_state.preedit_pos(&visible)
+                    };
+                    ime_cursor_rect_pixels(
+                        tabs.show_tab_bar(),
+                        drawer.tab_bar_height(),
+                        title_bar_height,
+                        cw,
+                        ch,
+                        cursor,
+                        preedit_pos_override,
+                    )
+                });
+                if last_ime_cursor_rect != next_ime_cursor_rect {
+                    window.set_ime_cursor_rect(next_ime_cursor_rect);
+                    last_ime_cursor_rect = next_ime_cursor_rect;
+                }
                 // Update window title with pomodoro + global avg
-                let title = build_title(&pomodoro, &tabs);
-                window.set_title(&title);
+                if let Some(title) =
+                    maybe_remember_title_update(&mut last_title, build_title(&pomodoro, &tabs))
+                {
+                    window.set_title(&title);
+                }
                 if let Some(f) = flog.as_mut() { f.log("render_start"); }
                 do_render!();
                 if let Some(f) = flog.as_mut() { f.log("render_done"); }
@@ -1048,8 +1082,11 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     window.set_coaching_checked(false);
                 }
                 config.save();
-                let title = build_title(&pomodoro, &tabs);
-                window.set_title(&title);
+                if let Some(title) =
+                    maybe_remember_title_update(&mut last_title, build_title(&pomodoro, &tabs))
+                {
+                    window.set_title(&title);
+                }
             }
             AppEvent::ToggleResponseTimer => {
                 response_timer_enabled = !response_timer_enabled;
@@ -1059,8 +1096,11 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                 config.response_timer = response_timer_enabled;
                 config.save();
                 window.set_response_timer_checked(response_timer_enabled);
-                let title = build_title(&pomodoro, &tabs);
-                window.set_title(&title);
+                if let Some(title) =
+                    maybe_remember_title_update(&mut last_title, build_title(&pomodoro, &tabs))
+                {
+                    window.set_title(&title);
+                }
             }
             AppEvent::ToggleCoaching => {
                 coaching_enabled = !coaching_enabled;
@@ -1217,6 +1257,29 @@ fn extract_pomodoro_tab_text(tabs: &TabManager, pomodoro: &Pomodoro) -> String {
         result.push_str(&text);
     }
     result
+}
+
+fn maybe_remember_title_update(last_title: &mut Option<String>, next_title: String) -> Option<String> {
+    if last_title.as_ref() == Some(&next_title) {
+        None
+    } else {
+        *last_title = Some(next_title.clone());
+        Some(next_title)
+    }
+}
+
+fn ime_cursor_rect_pixels(
+    show_tab_bar: bool,
+    tab_bar_h: f32,
+    title_bar_h: f32,
+    cell_w: f32,
+    cell_h: f32,
+    cursor: Option<(u16, u16)>,
+    preedit_pos_override: Option<(u16, u16)>,
+) -> Option<(f32, f32, f32, f32)> {
+    let (row, col) = preedit_pos_override.or(cursor)?;
+    let y_offset = crate::tab::content_y_offset(show_tab_bar, tab_bar_h, title_bar_h, false);
+    Some((col as f32 * cell_w, y_offset + row as f32 * cell_h, cell_w, cell_h))
 }
 
 fn build_title(pomodoro: &Pomodoro, tabs: &TabManager) -> String {
@@ -1544,5 +1607,71 @@ mod tests {
         let text = extract_grid_text(&grid, 1);
         assert!(!text.contains("old1"), "should not contain old1, got: {text}");
         assert!(text.contains("new2"));
+    }
+
+    #[test]
+    fn maybe_remember_title_update_returns_first_title() {
+        let mut cache = None;
+
+        let next = maybe_remember_title_update(&mut cache, "growTerm".to_string());
+
+        assert_eq!(next.as_deref(), Some("growTerm"));
+        assert_eq!(cache.as_deref(), Some("growTerm"));
+    }
+
+    #[test]
+    fn maybe_remember_title_update_skips_unchanged_title() {
+        let mut cache = Some("growTerm".to_string());
+
+        let next = maybe_remember_title_update(&mut cache, "growTerm".to_string());
+
+        assert!(next.is_none());
+        assert_eq!(cache.as_deref(), Some("growTerm"));
+    }
+
+    #[test]
+    fn maybe_remember_title_update_returns_changed_title() {
+        let mut cache = Some("growTerm".to_string());
+
+        let next = maybe_remember_title_update(&mut cache, "25:00".to_string());
+
+        assert_eq!(next.as_deref(), Some("25:00"));
+        assert_eq!(cache.as_deref(), Some("25:00"));
+    }
+
+    #[test]
+    fn ime_cursor_rect_pixels_returns_none_without_cursor() {
+        let rect = ime_cursor_rect_pixels(false, 24.0, 18.0, 10.0, 20.0, None, None);
+
+        assert!(rect.is_none());
+    }
+
+    #[test]
+    fn ime_cursor_rect_pixels_uses_cursor_position() {
+        let rect = ime_cursor_rect_pixels(false, 24.0, 18.0, 10.0, 20.0, Some((2, 3)), None);
+
+        assert_eq!(rect, Some((30.0, 58.0, 10.0, 20.0)));
+    }
+
+    #[test]
+    fn ime_cursor_rect_pixels_prefers_preedit_override() {
+        let rect = ime_cursor_rect_pixels(
+            false,
+            24.0,
+            18.0,
+            10.0,
+            20.0,
+            Some((2, 3)),
+            Some((4, 5)),
+        );
+
+        assert_eq!(rect, Some((50.0, 98.0, 10.0, 20.0)));
+    }
+
+    #[test]
+    fn ime_cursor_rect_pixels_includes_tab_bar_offset() {
+        let rect = ime_cursor_rect_pixels(true, 24.0, 18.0, 10.0, 20.0, Some((1, 2)), None);
+
+        assert_eq!(rect, Some((20.0, 62.0, 10.0, 20.0)));
     }
 }

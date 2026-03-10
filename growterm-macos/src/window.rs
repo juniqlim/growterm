@@ -107,6 +107,20 @@ impl MacWindow {
         });
     }
 
+    pub fn set_ime_cursor_rect(&self, rect: Option<(f32, f32, f32, f32)>) {
+        let raw = Retained::as_ptr(&self.view) as usize;
+        dispatch_async_main(move || {
+            let view = unsafe { &*(raw as *const TerminalView) };
+            let rect = rect.map(|(x, y, w, h)| {
+                NSRect::new(
+                    NSPoint::new(x as f64, y as f64),
+                    NSSize::new(w as f64, h as f64),
+                )
+            });
+            view.set_ime_cursor_rect(rect);
+        });
+    }
+
     pub fn discard_marked_text(&self) {
         let raw = Retained::as_ptr(&self.view) as usize;
         dispatch_async_main(move || {
