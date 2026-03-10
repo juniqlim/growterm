@@ -104,9 +104,15 @@ define_class! {
                 return;
             }
 
-            let cleared_stale_marked_text = {
+            let has_local_marked_text = !self.ivars().marked_text.borrow().is_empty();
+            let cleared_stale_marked_text = if should_clear_stale_marked_text(
+                has_local_marked_text,
+                self.input_context_has_marked_text(),
+            ) {
                 let mut marked = self.ivars().marked_text.borrow_mut();
                 clear_stale_marked_text(&mut marked)
+            } else {
+                false
             };
             if cleared_stale_marked_text {
                 self.send_event(AppEvent::Preedit(String::new()));
@@ -547,6 +553,19 @@ impl TerminalView {
             }
         }
     }
+
+    fn input_context_has_marked_text(&self) -> bool {
+        let view = self as *const Self as *const AnyObject;
+        unsafe {
+            let ctx: *const AnyObject = msg_send![view, inputContext];
+            if ctx.is_null() {
+                false
+            } else {
+                let has_marked_text: bool = msg_send![ctx, hasMarkedText];
+                has_marked_text
+            }
+        }
+    }
 }
 
 fn nsobj_to_string(obj: &AnyObject) -> String {
@@ -623,6 +642,13 @@ fn clear_stale_marked_text(marked_text: &mut String) -> bool {
         marked_text.clear();
         true
     }
+}
+
+fn should_clear_stale_marked_text(
+    has_local_marked_text: bool,
+    input_context_has_marked_text: bool,
+) -> bool {
+    has_local_marked_text && !input_context_has_marked_text
 }
 
 fn percent_decode(s: &str) -> String {
@@ -747,6 +773,21 @@ mod tests {
 
         assert!(cleared);
         assert!(marked.is_empty());
+    }
+
+    #[test]
+    fn should_not_clear_marked_text_when_input_context_is_still_composing() {
+        assert!(!should_clear_stale_marked_text(true, true));
+    }
+
+    #[test]
+    fn should_clear_marked_text_when_local_and_input_context_are_out_of_sync() {
+        assert!(should_clear_stale_marked_text(true, false));
+    }
+
+    #[test]
+    fn should_not_clear_marked_text_when_nothing_is_marked() {
+        assert!(!should_clear_stale_marked_text(false, false));
     }
 }
 
