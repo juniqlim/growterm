@@ -31,6 +31,7 @@ pub fn encode(event: KeyEvent) -> Vec<u8> {
         Key::Enter => vec![b'\r'],
         Key::Tab => vec![b'\t'],
         Key::Escape => vec![0x1b],
+        Key::Backspace if has_alt => vec![0x1b, 0x7f],
         Key::Backspace => vec![0x7f],
         Key::Delete => encode_tilde(3, has_shift, has_alt, has_ctrl),
         Key::ArrowUp => encode_cursor(b'A', has_shift, has_alt, has_ctrl),
@@ -296,6 +297,14 @@ mod tests {
         // Shift is already reflected in the char value (e.g. 'A' instead of 'a')
         let event = KeyEvent { key: Key::Char('A'), modifiers: Modifiers::SHIFT };
         assert_eq!(encode(event), b"A");
+    }
+
+    // --- Alt + backspace ---
+
+    #[test]
+    fn alt_backspace() {
+        let event = KeyEvent { key: Key::Backspace, modifiers: Modifiers::ALT };
+        assert_eq!(encode(event), b"\x1b\x7f");
     }
 
     // --- Edge: Ctrl + non-alpha ---
