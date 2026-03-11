@@ -501,7 +501,7 @@ impl GpuDrawer {
         is_break: bool,
         break_text: Option<&[String]>,
         transparent_tab_bar: bool,
-        has_scrollback: bool,
+        content_y_offset: f32,
         title_bar_height: f32,
         header_opacity: f32,
     ) -> bool {
@@ -531,18 +531,7 @@ impl GpuDrawer {
         });
 
         let (cell_w, cell_h) = self.atlas.cell_size();
-        // When transparent and screen is full (has_scrollback), draw from y=0
-        // so content shows behind the semi-transparent tab/title bar overlay.
-        // Before the screen fills up, offset content below the header.
-        let y_off = if transparent_tab_bar && has_scrollback {
-            0.0
-        } else if tab_bar.is_none() {
-            if transparent_tab_bar { title_bar_height } else { 0.0 }
-        } else if transparent_tab_bar {
-            title_bar_height + self.tab_bar_height()
-        } else {
-            self.tab_bar_height()
-        };
+        let y_off = content_y_offset;
 
         // Build bg vertices
         let mut bg_vertices: Vec<BgVertex> = Vec::new();

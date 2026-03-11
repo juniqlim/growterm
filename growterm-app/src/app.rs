@@ -1411,7 +1411,8 @@ fn render_with_tabs(drawer: &mut GpuDrawer, tabs: &TabManager, preedit: &str, se
     };
 
     let has_scrollback = scrollback_len > 0;
-    drawer.draw(&commands, scrollbar, tab_bar.as_ref(), is_break, break_text, transparent_tab_bar, has_scrollback, title_bar_height, header_opacity)
+    let y_offset = crate::tab::content_y_offset(show_tab_bar, drawer.tab_bar_height(), title_bar_height, has_scrollback);
+    drawer.draw(&commands, scrollbar, tab_bar.as_ref(), is_break, break_text, transparent_tab_bar, y_offset, title_bar_height, header_opacity)
 }
 
 #[cfg(test)]
