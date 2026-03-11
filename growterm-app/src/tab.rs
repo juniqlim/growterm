@@ -80,10 +80,8 @@ pub fn hit_test_tab_bar(y: f32, tab_bar_h: f32, tab_bar_y: f32) -> bool {
 /// Content Y offset for rendering — where terminal content starts.
 pub fn content_y_offset(show_tab_bar: bool, tab_bar_h: f32, title_bar_h: f32, has_scrollback: bool) -> f32 {
     let transparent = title_bar_h > 0.0;
-    // When transparent and screen is full (has_scrollback), content is drawn
-    // from y=0 so it shows behind the semi-transparent header overlay.
     if transparent && has_scrollback {
-        return 0.0;
+        return if show_tab_bar { tab_bar_h } else { 0.0 };
     }
     if !show_tab_bar {
         if transparent { title_bar_h } else { 0.0 }
@@ -194,14 +192,8 @@ impl TabManager {
     /// Terminal rows adjusted for title/tab bar offsets.
     /// In transparent mode, use full screen height (no title bar subtraction)
     /// so content fills the entire screen when drawn from y=0.
-    pub fn term_rows(&self, screen_h: u32, cell_h: f32, tab_bar_h: f32, title_bar_h: f32) -> u16 {
-        let transparent = title_bar_h > 0.0;
-        let y_off = if transparent {
-            // Only subtract tab bar height when visible; title bar is overlaid
-            if self.show_tab_bar() { tab_bar_h } else { 0.0 }
-        } else {
-            content_y_offset(self.show_tab_bar(), tab_bar_h, title_bar_h, false)
-        };
+    pub fn term_rows(&self, screen_h: u32, cell_h: f32, tab_bar_h: f32, title_bar_h: f32, has_scrollback: bool) -> u16 {
+        let y_off = content_y_offset(self.show_tab_bar(), tab_bar_h, title_bar_h, has_scrollback);
         ((screen_h as f32 - y_off) / cell_h).floor().max(1.0) as u16
     }
 
@@ -963,7 +955,8 @@ mod tests {
 
     #[test]
     fn content_y_offset_transparent_with_tab_bar_has_scrollback() {
-        assert_eq!(content_y_offset(true, TAB_BAR_H, TITLE_BAR_H, true), 0.0);
+        // Tab bar still occupies space even with scrollback
+        assert_eq!(content_y_offset(true, TAB_BAR_H, TITLE_BAR_H, true), TAB_BAR_H);
     }
 
     // --- tab_bar_y_position tests ---
@@ -1398,31 +1391,49 @@ mod tests {
         let mut mgr = TabManager::new();
         mgr.add_tab(dummy_tab());
         mgr.add_tab(dummy_tab());
-        assert_eq!(mgr.mouse_y_offset(30.0, 50.0, true), 0.0);
+        // Tab bar still occupies space even with scrollback
+        assert_eq!(mgr.mouse_y_offset(30.0, 50.0, true), 30.0);
     }
 
     #[test]
-    fn term_rows_opaque_without_tab_bar_uses_full_height() {
+    fn term_rows_opaque_without_tab_bar() {
         let mut mgr = TabManager::new();
         mgr.add_tab(dummy_tab());
-        assert_eq!(mgr.term_rows(600, 20.0, 30.0, 0.0), 30);
+        assert_eq!(mgr.term_rows(600, 20.0, 30.0, 0.0, false), 30);
     }
 
     #[test]
-    fn term_rows_transparent_without_tab_bar_uses_full_height() {
+    fn term_rows_transparent_no_scrollback() {
         let mut mgr = TabManager::new();
         mgr.add_tab(dummy_tab());
-        // Transparent mode: no title bar subtraction, full screen rows
-        assert_eq!(mgr.term_rows(600, 20.0, 30.0, 60.0), 30);
+        // No scrollback: title_bar subtracted, (600 - 60) / 20 = 27
+        assert_eq!(mgr.term_rows(600, 20.0, 30.0, 60.0, false), 27);
     }
 
     #[test]
-    fn term_rows_transparent_with_tab_bar_excludes_only_tab_bar() {
+    fn term_rows_transparent_has_scrollback() {
+        let mut mgr = TabManager::new();
+        mgr.add_tab(dummy_tab());
+        // Has scrollback: content from y=0, full screen rows
+        assert_eq!(mgr.term_rows(600, 20.0, 30.0, 60.0, true), 30);
+    }
+
+    #[test]
+    fn term_rows_transparent_with_tab_bar_no_scrollback() {
         let mut mgr = TabManager::new();
         mgr.add_tab(dummy_tab());
         mgr.add_tab(dummy_tab());
-        // Transparent mode: only tab bar subtracted, not title bar
-        assert_eq!(mgr.term_rows(600, 20.0, 30.0, 60.0), 28);
+        // No scrollback: title_bar + tab_bar subtracted, (600 - 60 - 30) / 20 = 25
+        assert_eq!(mgr.term_rows(600, 20.0, 30.0, 60.0, false), 25);
+    }
+
+    #[test]
+    fn term_rows_transparent_with_tab_bar_has_scrollback() {
+        let mut mgr = TabManager::new();
+        mgr.add_tab(dummy_tab());
+        mgr.add_tab(dummy_tab());
+        // Has scrollback: title bar reclaimed but tab bar still subtracted, (600 - 30) / 20 = 28
+        assert_eq!(mgr.term_rows(600, 20.0, 30.0, 60.0, true), 28);
     }
 
 

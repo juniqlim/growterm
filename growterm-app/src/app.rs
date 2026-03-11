@@ -145,7 +145,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
     } else {
         0.0
     };
-    let rows = tabs.term_rows(height, cell_h, drawer.tab_bar_height(), initial_title_bar_height);
+    let rows = tabs.term_rows(height, cell_h, drawer.tab_bar_height(), initial_title_bar_height, false);
     match Tab::spawn(rows, cols, window.clone()) {
         Ok(tab) => {
             tabs.add_tab(tab);
@@ -325,7 +325,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                         } else {
                             0.0
                         };
-                        let term_rows = tabs.term_rows(h, ch, drawer.tab_bar_height(), next_title_bar_height);
+                        let term_rows = tabs.term_rows(h, ch, drawer.tab_bar_height(), next_title_bar_height, false);
                         let active_cwd = tabs
                             .active_tab()
                             .and_then(|t| t.pty_writer.child_pid())
@@ -370,7 +370,8 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                             let (cw, ch) = drawer.cell_size();
                             let (w, h) = window.inner_size();
                             let cols = (w as f32 / cw).floor().max(1.0) as u16;
-                            let rows = tabs.term_rows(h, ch, drawer.tab_bar_height(), title_bar_height);
+                            let has_scrollback = tabs.active_tab().map_or(false, |t| t.terminal.lock().unwrap().grid.scrollback_len() > 0);
+                            let rows = tabs.term_rows(h, ch, drawer.tab_bar_height(), title_bar_height, has_scrollback);
                             if let Some(t) = tabs.active_tab_mut() {
                                 let mut st = t.terminal.lock().unwrap();
                                 st.grid.resize(cols, rows);
@@ -540,7 +541,8 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                         let (cw, ch) = drawer.cell_size();
                         let (w, h) = window.inner_size();
                         let cols = (w as f32 / cw).floor().max(1.0) as u16;
-                        let term_rows = tabs.term_rows(h, ch, drawer.tab_bar_height(), title_bar_height);
+                        let has_sb = tabs.active_tab().map_or(false, |t| t.terminal.lock().unwrap().grid.scrollback_len() > 0);
+                        let term_rows = tabs.term_rows(h, ch, drawer.tab_bar_height(), title_bar_height, has_sb);
                         resize_all_tabs(&mut tabs, cols, term_rows);
                         do_render!();
                         continue;
@@ -906,7 +908,8 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                 drawer.resize(w, h);
                 let (cw, ch) = drawer.cell_size();
                 let cols = (w as f32 / cw).floor().max(1.0) as u16;
-                let term_rows = tabs.term_rows(h, ch, drawer.tab_bar_height(), title_bar_height);
+                let has_sb = tabs.active_tab().map_or(false, |t| t.terminal.lock().unwrap().grid.scrollback_len() > 0);
+                let term_rows = tabs.term_rows(h, ch, drawer.tab_bar_height(), title_bar_height, has_sb);
                 resize_all_tabs(&mut tabs, cols, term_rows);
                 do_render!();
             }
@@ -1130,7 +1133,8 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     let (cw, ch) = drawer.cell_size();
                     let (w, h) = window.inner_size();
                     let cols = (w as f32 / cw).floor().max(1.0) as u16;
-                    let term_rows = tabs.term_rows(h, ch, drawer.tab_bar_height(), title_bar_height);
+                    let has_sb = tabs.active_tab().map_or(false, |t| t.terminal.lock().unwrap().grid.scrollback_len() > 0);
+                    let term_rows = tabs.term_rows(h, ch, drawer.tab_bar_height(), title_bar_height, has_sb);
                     resize_all_tabs(&mut tabs, cols, term_rows);
                 }
                 // Apply pomodoro time changes
