@@ -251,6 +251,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
         window.set_pomodoro_checked(true);
     }
     let mut coaching_enabled = config.coaching;
+    pomodoro.set_coaching(coaching_enabled);
     window.set_coaching_checked(coaching_enabled);
     window.set_coaching_menu_enabled(config.pomodoro);
     let mut transparent_tab_bar = config.transparent_tab_bar;
@@ -1229,6 +1230,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                 if !enabled {
                     coaching_enabled = false;
                     config.coaching = false;
+                    pomodoro.set_coaching(false);
                     window.set_coaching_checked(false);
                 }
                 config.save();
@@ -1255,6 +1257,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
             AppEvent::ToggleCoaching => {
                 coaching_enabled = !coaching_enabled;
                 config.coaching = coaching_enabled;
+                pomodoro.set_coaching(coaching_enabled);
                 config.save();
                 window.set_coaching_checked(coaching_enabled);
             }
@@ -1311,6 +1314,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                 }
                 if new_config.coaching != config.coaching {
                     coaching_enabled = new_config.coaching;
+                    pomodoro.set_coaching(coaching_enabled);
                     window.set_coaching_checked(coaching_enabled);
                 }
                 if new_config.transparent_tab_bar != config.transparent_tab_bar {

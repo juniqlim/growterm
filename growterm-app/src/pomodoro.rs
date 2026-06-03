@@ -30,6 +30,8 @@ pub struct Pomodoro {
     scrollback_snapshot: HashMap<u64, usize>,
     /// AI coaching response lines, shared with the background thread.
     ai_response: Arc<Mutex<Option<Vec<String>>>>,
+    /// Whether AI coaching is enabled (shows coaching panel during break).
+    coaching: bool,
 }
 
 impl Pomodoro {
@@ -42,7 +44,13 @@ impl Pomodoro {
             break_secs,
             scrollback_snapshot: HashMap::new(),
             ai_response: Arc::new(Mutex::new(None)),
+            coaching: true,
         }
+    }
+
+    /// Enable or disable AI coaching display.
+    pub fn set_coaching(&mut self, enabled: bool) {
+        self.coaching = enabled;
     }
 
     pub fn toggle(&mut self) {
@@ -138,7 +146,7 @@ impl Pomodoro {
     }
 
     pub fn coaching_lines(&self) -> Option<Vec<String>> {
-        if self.phase != Phase::Break {
+        if !self.coaching || self.phase != Phase::Break {
             return None;
         }
         let guard = self.ai_response.lock().unwrap();
@@ -467,6 +475,20 @@ mod tests {
         assert_eq!(lines[0], "[Coaching]");
         assert!(lines.iter().any(|l| l.contains("잘 집중")));
         assert!(lines.iter().any(|l| l.contains("커밋")));
+    }
+
+    #[test]
+    fn coaching_lines_returns_none_when_coaching_disabled() {
+        let mut p = enabled_pomodoro();
+        p.set_coaching(false);
+        let now = Instant::now();
+        p.on_input_at(now, &[(0, 0)]);
+        p.tick_at(now + Duration::from_secs(DEFAULT_WORK_SECS));
+        assert_eq!(p.phase(), Phase::Break);
+        assert!(
+            p.coaching_lines().is_none(),
+            "coaching disabled -> None even during break"
+        );
     }
 
     #[test]
