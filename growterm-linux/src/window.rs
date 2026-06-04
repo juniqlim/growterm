@@ -3,8 +3,8 @@ use std::sync::{mpsc, Arc};
 
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::application::ApplicationHandler;
-use winit::dpi::{LogicalPosition, LogicalSize, PhysicalPosition};
-use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
+use winit::dpi::{LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize};
+use winit::event::{ElementState, Ime, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{ModifiersState, PhysicalKey};
 use winit::window::{Window, WindowAttributes, WindowId};
@@ -46,7 +46,14 @@ impl MacWindow {
         self.copy_mode.store(enabled, Ordering::Relaxed);
     }
 
-    pub fn set_ime_cursor_rect(&self, _rect: Option<(f32, f32, f32, f32)>) {}
+    pub fn set_ime_cursor_rect(&self, rect: Option<(f32, f32, f32, f32)>) {
+        if let Some((x, y, w, h)) = rect {
+            self.window.set_ime_cursor_area(
+                PhysicalPosition::new(x, y),
+                PhysicalSize::new(w.max(1.0), h.max(1.0)),
+            );
+        }
+    }
 
     pub fn discard_marked_text(&self) {}
 
@@ -112,6 +119,7 @@ where
     sender: Option<mpsc::Sender<AppEvent>>,
     modifiers: ModifiersState,
     cursor_position: (f64, f64),
+    ime_composing: bool,
 }
 
 impl<F> GrowtermApp<F>
@@ -146,11 +154,11 @@ where
             attrs = attrs.with_position(LogicalPosition::new(x, y));
         }
 
-        let window = Arc::new(MacWindow::new(
-            event_loop
-                .create_window(attrs)
-                .expect("create linux window"),
-        ));
+        let raw_window = event_loop
+            .create_window(attrs)
+            .expect("create linux window");
+        raw_window.set_ime_allowed(true);
+        let window = Arc::new(MacWindow::new(raw_window));
         let (tx, rx) = mpsc::channel();
         self.sender = Some(tx);
 
@@ -183,7 +191,24 @@ where
             WindowEvent::ModifiersChanged(modifiers) => {
                 self.modifiers = modifiers.state();
             }
+            WindowEvent::Ime(ime) => match ime {
+                Ime::Enabled | Ime::Disabled => {
+                    self.ime_composing = false;
+                }
+                Ime::Preedit(text, _) => {
+                    self.ime_composing = !text.is_empty();
+                    self.send(AppEvent::Preedit(text));
+                }
+                Ime::Commit(text) => {
+                    self.ime_composing = false;
+                    self.send(AppEvent::Preedit(String::new()));
+                    self.send(AppEvent::TextCommit(text));
+                }
+            },
             WindowEvent::KeyboardInput { event, .. } => {
+                if self.ime_composing {
+                    return;
+                }
                 let event_type = match event.state {
                     ElementState::Pressed if event.repeat => growterm_types::KeyEventType::Repeat,
                     ElementState::Pressed => growterm_types::KeyEventType::Press,
@@ -276,6 +301,7 @@ pub fn run(
         sender: None,
         modifiers: ModifiersState::empty(),
         cursor_position: (0.0, 0.0),
+        ime_composing: false,
     };
     event_loop.run_app(&mut app).expect("run linux event loop");
 }
