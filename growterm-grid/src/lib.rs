@@ -239,6 +239,8 @@ impl Grid {
             row.resize(new_cols, Cell::default());
         }
 
+        // Invariant: cells length must equal new_rows
+        self.cells.resize(new_rows, vec![Cell::default(); new_cols]);
         self.cols = new_cols;
         self.rows = new_rows;
         self.cursor_row = self.cursor_row.min(self.rows - 1);
