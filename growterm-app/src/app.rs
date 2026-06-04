@@ -379,7 +379,9 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
             } => {
                 use crate::platform::key_convert::keycode as kc;
 
-                if modifiers.contains(Modifiers::SUPER) {
+                if modifiers.contains(Modifiers::SUPER)
+                    && event_type != growterm_types::KeyEventType::Release
+                {
                     // Cmd+N: new window (spawn new process)
                     if keycode == kc::ANSI_N {
                         spawn_new_window();
