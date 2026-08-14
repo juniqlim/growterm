@@ -170,9 +170,50 @@ impl GlyphAtlas {
         self.ascent
     }
 
+    /// Locate a system font that covers `c` via fontconfig (`fc-match`).
+    /// Loads and caches it so `get_or_insert` can rasterize the glyph.
+    /// Color-emoji fonts (CBDT/COLR) that fontdue can't outline are rejected.
     #[cfg(not(target_os = "macos"))]
-    fn find_system_font(&mut self, _c: char) -> bool {
-        false
+    fn find_system_font(&mut self, c: char) -> bool {
+        if let Some(path) = self.char_to_font_path.get(&c) {
+            return self.system_font_cache.contains_key(path);
+        }
+
+        let output = std::process::Command::new("fc-match")
+            .arg("--format=%{file}")
+            .arg(format!(":charset={:x}", c as u32))
+            .output();
+        let path = match output {
+            Ok(o) if o.status.success() => {
+                let p = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                if p.is_empty() {
+                    return false;
+                }
+                PathBuf::from(p)
+            }
+            _ => return false,
+        };
+
+        if !self.system_font_cache.contains_key(&path) {
+            let Ok(data) = std::fs::read(&path) else {
+                return false;
+            };
+            let settings = fontdue::FontSettings {
+                scale: self.size,
+                ..Default::default()
+            };
+            let Ok(font) = fontdue::Font::from_bytes(data, settings) else {
+                return false;
+            };
+            self.system_font_cache.insert(path.clone(), font);
+        }
+
+        // fc-match always returns some font; accept only if it truly covers c.
+        if self.system_font_cache.get(&path).unwrap().lookup_glyph_index(c) == 0 {
+            return false;
+        }
+        self.char_to_font_path.insert(c, path);
+        true
     }
 
     #[cfg(target_os = "macos")]
@@ -424,3 +465,7 @@ mod tests {
         assert_ne!(normal_bitmap, bold_bitmap, "Bold cached glyph should differ from normal");
     }
 }
+
+
+
+
