@@ -144,9 +144,20 @@ pub fn spawn_with_cwd(
     ))
 }
 
-/// Get the current working directory of a process by PID (macOS only).
+/// Get the current working directory of a process by PID.
 pub fn child_cwd(pid: u32) -> Option<PathBuf> {
-    #[cfg(target_os = "macos")]
+    let path = resolve_cwd(pid)?;
+    path.is_dir().then_some(path)
+}
+
+/// Linux (and anything else with procfs) exposes the CWD as a symlink.
+#[cfg(not(target_os = "macos"))]
+fn resolve_cwd(pid: u32) -> Option<PathBuf> {
+    std::fs::read_link(format!("/proc/{pid}/cwd")).ok()
+}
+
+#[cfg(target_os = "macos")]
+fn resolve_cwd(pid: u32) -> Option<PathBuf> {
     {
         use std::mem;
 
@@ -178,18 +189,8 @@ pub fn child_cwd(pid: u32) -> Option<PathBuf> {
                 return None;
             }
             let c_str = std::ffi::CStr::from_ptr(info.pvi_cdir.vip_path.as_ptr());
-            let path = PathBuf::from(c_str.to_string_lossy().into_owned());
-            if path.is_dir() {
-                Some(path)
-            } else {
-                None
-            }
+            Some(PathBuf::from(c_str.to_string_lossy().into_owned()))
         }
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = pid;
-        None
     }
 }
 
