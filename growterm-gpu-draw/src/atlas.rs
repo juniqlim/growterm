@@ -268,6 +268,22 @@ impl GlyphAtlas {
         false
     }
 
+    /// fontdue는 힌팅/스템 다크닝이 없어 안티앨리어싱 획이 얇고 흐리게(뿌옇게) 보인다.
+    /// 커버리지에 감마(<1.0) 곡선을 적용해 부분 커버리지 픽셀을 진하게 만들어,
+    /// FreeType 렌더링에 가깝게 획을 또렷하게 보정한다. 0/255 끝값은 그대로 둔다.
+    fn darken_coverage(a: u8) -> u8 {
+        const STEM_GAMMA: f32 = 0.72;
+        if a == 0 || a == 255 {
+            return a;
+        }
+        let x = a as f32 / 255.0;
+        (x.powf(STEM_GAMMA) * 255.0).round() as u8
+    }
+
+    fn darkened(bitmap: Vec<u8>) -> Vec<u8> {
+        bitmap.into_iter().map(Self::darken_coverage).collect()
+    }
+
     pub fn get_or_insert(&mut self, c: char) -> &RasterizedGlyph {
         if !self.cache.contains_key(&c) {
             // find_system_font borrows &mut self, so call it before taking &self refs
@@ -290,6 +306,7 @@ impl GlyphAtlas {
             };
 
             let (metrics, bitmap) = font.rasterize(c, self.size);
+            let bitmap = Self::darkened(bitmap);
             self.cache.insert(c, RasterizedGlyph {
                 width: metrics.width as u32,
                 height: metrics.height as u32,
@@ -317,6 +334,7 @@ impl GlyphAtlas {
             };
 
             let (metrics, bitmap) = font.rasterize(c, self.size);
+            let bitmap = Self::darkened(bitmap);
             self.bold_cache.insert(c, RasterizedGlyph {
                 width: metrics.width as u32,
                 height: metrics.height as u32,
@@ -355,6 +373,41 @@ mod tests {
         let (_, bold_bitmap) = bold_font.rasterize('가', size);
 
         assert_ne!(normal_bitmap, bold_bitmap, "Bold Korean glyph should differ from normal");
+    }
+
+    #[test]
+    fn darken_coverage_preserves_endpoints_and_thickens_midtones() {
+        assert_eq!(GlyphAtlas::darken_coverage(0), 0, "완전 투명은 유지");
+        assert_eq!(GlyphAtlas::darken_coverage(255), 255, "완전 불투명은 유지");
+        assert!(
+            GlyphAtlas::darken_coverage(128) > 128,
+            "중간 커버리지는 진해져야 함"
+        );
+
+        // 단조 증가 확인
+        let mut prev = 0;
+        for a in 0..=255u8 {
+            let v = GlyphAtlas::darken_coverage(a);
+            assert!(v >= prev, "커버리지 보정은 단조 증가여야 함: a={a}");
+            prev = v;
+        }
+    }
+
+    #[test]
+    fn get_or_insert_darkens_glyph_coverage() {
+        let size = 32.0;
+        let raw = GlyphAtlas::load_builtin_font(size);
+        let (_, raw_bitmap) = raw.rasterize('A', size);
+        let raw_sum: u64 = raw_bitmap.iter().map(|&b| b as u64).sum();
+
+        let mut atlas = GlyphAtlas::new(size, None);
+        let g = atlas.get_or_insert('A');
+        let darkened_sum: u64 = g.bitmap.iter().map(|&b| b as u64).sum();
+
+        assert!(
+            darkened_sum > raw_sum,
+            "스템 다크닝 적용 후 총 커버리지가 커야 함: {darkened_sum} > {raw_sum}"
+        );
     }
 
     #[test]
