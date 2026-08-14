@@ -2,10 +2,15 @@ use std::collections::HashSet;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
+/// This package is excluded from the workspace, so cargo has to be pointed at
+/// the workspace manifest: selecting growterm-app from here makes cargo panic,
+/// and this package's own target directory is not where the binary lands.
+const WORKSPACE_MANIFEST: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../Cargo.toml");
+
 /// Build the growterm binary and return the path.
 pub fn build_binary() -> String {
     let output = Command::new("cargo")
-        .args(["build", "--package", "growterm-app"])
+        .args(["build", "--package", "growterm-app", "--manifest-path", WORKSPACE_MANIFEST])
         .output()
         .expect("failed to run cargo build");
     assert!(
@@ -15,7 +20,7 @@ pub fn build_binary() -> String {
     );
 
     let metadata = Command::new("cargo")
-        .args(["metadata", "--format-version=1", "--no-deps"])
+        .args(["metadata", "--format-version=1", "--no-deps", "--manifest-path", WORKSPACE_MANIFEST])
         .output()
         .expect("failed to run cargo metadata");
     let meta: serde_json::Value =

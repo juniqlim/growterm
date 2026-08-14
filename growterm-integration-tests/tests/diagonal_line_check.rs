@@ -8,7 +8,7 @@ const HEIGHT: u32 = 600;
 /// 전체 화면을 채운 큰 그리드로 테스트한다.
 #[test]
 fn no_gap_between_same_color_cells() {
-    let atlas = growterm_gpu_draw::GlyphAtlas::new(FONT_SIZE);
+    let atlas = growterm_gpu_draw::GlyphAtlas::new(FONT_SIZE, None);
     let (cell_w, cell_h) = atlas.cell_size();
     let cols = (WIDTH as f32 / cell_w).floor() as u16;
     let rows = (HEIGHT as f32 / cell_h).floor() as u16;

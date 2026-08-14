@@ -5,7 +5,7 @@ const FONT_SIZE: f32 = 32.0;
 /// baseline을 폰트의 ascent로 설정하면 █ 글리프가 셀을 정확히 채우는지 검증.
 #[test]
 fn block_char_covers_cell_with_ascent_baseline() {
-    let mut atlas = GlyphAtlas::new(FONT_SIZE);
+    let mut atlas = GlyphAtlas::new(FONT_SIZE, None);
     let (cell_w, cell_h) = atlas.cell_size();
     let ascent = atlas.ascent();
 

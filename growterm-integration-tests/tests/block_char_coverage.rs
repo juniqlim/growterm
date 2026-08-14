@@ -6,7 +6,7 @@ const FONT_SIZE: f32 = 32.0;
 /// 글리프가 셀보다 작으면 배경이 비쳐서 보더라인이 보인다.
 #[test]
 fn block_char_fills_cell() {
-    let mut atlas = GlyphAtlas::new(FONT_SIZE);
+    let mut atlas = GlyphAtlas::new(FONT_SIZE, None);
     let (cell_w, cell_h) = atlas.cell_size();
 
     let block_chars = ['█', '▐', '▛', '▜', '▝', '▘', '▌'];
