@@ -108,10 +108,10 @@ pub struct Config {
     pub font_size: f32,
     #[serde(default)]
     pub pomodoro: bool,
-    #[serde(default = "default_pomodoro_work_minutes")]
-    pub pomodoro_work_minutes: u64,
-    #[serde(default = "default_pomodoro_break_minutes")]
-    pub pomodoro_break_minutes: u64,
+    #[serde(default = "default_pomodoro_work_seconds")]
+    pub pomodoro_work_seconds: u64,
+    #[serde(default = "default_pomodoro_break_seconds")]
+    pub pomodoro_break_seconds: u64,
     #[serde(default)]
     pub response_timer: bool,
     #[serde(default = "default_true")]
@@ -142,12 +142,12 @@ fn default_font_size() -> f32 {
     32.0
 }
 
-fn default_pomodoro_work_minutes() -> u64 {
-    25
+fn default_pomodoro_work_seconds() -> u64 {
+    25 * 60
 }
 
-fn default_pomodoro_break_minutes() -> u64 {
-    3
+fn default_pomodoro_break_seconds() -> u64 {
+    3 * 60
 }
 
 fn default_header_opacity() -> f32 {
@@ -164,8 +164,8 @@ impl Default for Config {
             font_family: default_font_family(),
             font_size: default_font_size(),
             pomodoro: false,
-            pomodoro_work_minutes: default_pomodoro_work_minutes(),
-            pomodoro_break_minutes: default_pomodoro_break_minutes(),
+            pomodoro_work_seconds: default_pomodoro_work_seconds(),
+            pomodoro_break_seconds: default_pomodoro_break_seconds(),
             response_timer: false,
             coaching: true,
             transparent_tab_bar: false,
@@ -250,8 +250,8 @@ impl Config {
             font_family: default_font_family(),
             font_size: default_font_size(),
             pomodoro: read_bool("pomodoro_enabled", false),
-            pomodoro_work_minutes: default_pomodoro_work_minutes(),
-            pomodoro_break_minutes: default_pomodoro_break_minutes(),
+            pomodoro_work_seconds: default_pomodoro_work_seconds(),
+            pomodoro_break_seconds: default_pomodoro_break_seconds(),
             response_timer: read_bool("response_timer_enabled", false),
             coaching: read_bool("coaching_enabled", true),
             transparent_tab_bar: read_bool("transparent_tab_bar", false),
@@ -448,16 +448,22 @@ window_y = 50
     #[test]
     fn pomodoro_time_defaults() {
         let config: Config = toml::from_str("").unwrap();
-        assert_eq!(config.pomodoro_work_minutes, 25);
-        assert_eq!(config.pomodoro_break_minutes, 3);
+        assert_eq!(config.pomodoro_work_seconds, 25 * 60);
+        assert_eq!(config.pomodoro_break_seconds, 3 * 60);
     }
 
     #[test]
     fn pomodoro_time_custom() {
-        let toml = "pomodoro_work_minutes = 50\npomodoro_break_minutes = 10\n";
+        let toml = "pomodoro_work_seconds = 3000\npomodoro_break_seconds = 600\n";
         let config: Config = toml::from_str(toml).unwrap();
-        assert_eq!(config.pomodoro_work_minutes, 50);
-        assert_eq!(config.pomodoro_break_minutes, 10);
+        assert_eq!(config.pomodoro_work_seconds, 3000);
+        assert_eq!(config.pomodoro_break_seconds, 600);
+    }
+
+    #[test]
+    fn pomodoro_break_accepts_under_a_minute() {
+        let config: Config = toml::from_str("pomodoro_break_seconds = 10\n").unwrap();
+        assert_eq!(config.pomodoro_break_seconds, 10);
     }
 
     #[test]
@@ -476,7 +482,7 @@ window_y = 50
 
         let mut config = Config::default();
         config.pomodoro = true;
-        config.pomodoro_work_minutes = 2;
+        config.pomodoro_work_seconds = 120;
         config.coaching_command = Some("claude -p".to_string());
         config.window_x = Some(100.0);
         config.window_y = Some(50.0);
@@ -492,7 +498,7 @@ window_y = 50
 
         // Verify all fields survived
         let final_config: Config = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(final_config.pomodoro_work_minutes, 2);
+        assert_eq!(final_config.pomodoro_work_seconds, 120);
         assert_eq!(final_config.coaching_command, Some("claude -p".to_string()));
         assert!(final_config.transparent_tab_bar);
         assert_eq!(final_config.window_x, Some(100.0));

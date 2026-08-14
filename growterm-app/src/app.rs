@@ -245,7 +245,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
     let mut copy_mode = CopyMode::new();
     let mut copy_mode_action_map = config.copy_mode_keys.build_action_map();
     let mut search_mode = SearchMode::new();
-    let mut pomodoro = Pomodoro::new(config.pomodoro_work_minutes * 60, config.pomodoro_break_minutes * 60);
+    let mut pomodoro = Pomodoro::new(config.pomodoro_work_seconds, config.pomodoro_break_seconds);
     if config.pomodoro {
         pomodoro.toggle();
         window.set_pomodoro_checked(true);
@@ -1292,13 +1292,13 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     resize_all_tabs(&mut tabs, cols, term_rows);
                 }
                 // Apply pomodoro time changes
-                if new_config.pomodoro_work_minutes != config.pomodoro_work_minutes
-                    || new_config.pomodoro_break_minutes != config.pomodoro_break_minutes
+                if new_config.pomodoro_work_seconds != config.pomodoro_work_seconds
+                    || new_config.pomodoro_break_seconds != config.pomodoro_break_seconds
                 {
                     let was_enabled = pomodoro.is_enabled();
                     pomodoro = Pomodoro::new(
-                        new_config.pomodoro_work_minutes * 60,
-                        new_config.pomodoro_break_minutes * 60,
+                        new_config.pomodoro_work_seconds,
+                        new_config.pomodoro_break_seconds,
                     );
                     if was_enabled {
                         pomodoro.toggle();
