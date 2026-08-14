@@ -48,6 +48,12 @@ pub struct TabBarInfo {
     pub active_index: usize,
 }
 
+/// Tab labels hint the switch shortcut: Cmd on macOS, Alt on Linux.
+#[cfg(target_os = "macos")]
+const TAB_SHORTCUT_PREFIX: &str = "⌘";
+#[cfg(not(target_os = "macos"))]
+const TAB_SHORTCUT_PREFIX: &str = "Alt";
+
 fn vt_capture_path_from_env_with(value: Option<std::ffi::OsString>) -> Option<PathBuf> {
     let path = value?;
     if path.is_empty() {
@@ -258,7 +264,7 @@ impl TabManager {
                 .map(|(idx, tab)| {
                     let num = idx + 1;
                     let label = if num <= 9 {
-                        format!("⌘{}", num)
+                        format!("{}{}", TAB_SHORTCUT_PREFIX, num)
                     } else {
                         format!("{}", num)
                     };
@@ -1345,7 +1351,8 @@ mod tests {
         mgr.add_tab(dummy_tab());
 
         let info = mgr.tab_bar_info();
-        assert_eq!(info.titles, vec!["⌘1", "⌘2"]);
+        let p = TAB_SHORTCUT_PREFIX;
+        assert_eq!(info.titles, vec![format!("{p}1"), format!("{p}2")]);
         assert_eq!(info.active_index, 1);
     }
 
