@@ -7,7 +7,7 @@ use winit::dpi::{LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, Ime, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{ModifiersState, PhysicalKey};
-use winit::window::{Window, WindowAttributes, WindowId};
+use winit::window::{Theme, Window, WindowAttributes, WindowId};
 
 use crate::event::{AppEvent, Modifiers};
 use crate::key_convert::physical_keycode_to_app_keycode;
@@ -44,6 +44,10 @@ impl MacWindow {
 
     pub fn set_copy_mode(&self, enabled: bool) {
         self.copy_mode.store(enabled, Ordering::Relaxed);
+        // Copy mode uses vim-style navigation (j/k). While a Hangul IME is
+        // active it would otherwise intercept those keys as composition, so
+        // disable IME in copy mode and restore it on exit.
+        self.window.set_ime_allowed(!enabled);
     }
 
     pub fn set_ime_cursor_rect(&self, rect: Option<(f32, f32, f32, f32)>) {
@@ -148,6 +152,7 @@ where
 
         let mut attrs = WindowAttributes::default()
             .with_title("growterm")
+            .with_theme(Some(Theme::Dark))
             .with_inner_size(LogicalSize::new(self.window_size.0, self.window_size.1))
             .with_visible(false);
         if let Some((x, y)) = self.window_position {
@@ -219,7 +224,25 @@ where
                     PhysicalKey::Unidentified(_) => None,
                 };
                 let characters = event.text.as_ref().map(|text| text.to_string());
-                let modifiers = self.current_modifiers();
+                let mut modifiers = self.current_modifiers();
+
+                // GNOME/X11 grabs and reorders the Super key, so Linux app
+                // shortcuts use Ctrl(+Shift). Remap them to the SUPER-based
+                // shortcut handlers shared with macOS.
+                if modifiers.contains(Modifiers::CONTROL) {
+                    use crate::key_convert::keycode as kc;
+                    let shift = modifiers.contains(Modifiers::SHIFT);
+                    let is_shortcut = match keycode {
+                        Some(k) if !shift => k == kc::ANSI_EQUAL || k == kc::ANSI_MINUS,
+                        Some(k) => k == kc::ANSI_N || k == kc::ANSI_T,
+                        None => false,
+                    };
+                    if is_shortcut {
+                        modifiers.remove(Modifiers::CONTROL | Modifiers::SHIFT);
+                        modifiers.insert(Modifiers::SUPER);
+                    }
+                }
+
                 let should_commit_text = event_type == growterm_types::KeyEventType::Press
                     && !self
                         .window
