@@ -123,6 +123,7 @@ where
     sender: Option<mpsc::Sender<AppEvent>>,
     modifiers: ModifiersState,
     cursor_position: (f64, f64),
+    mouse_left_pressed: bool,
     ime_composing: bool,
 }
 
@@ -298,20 +299,29 @@ where
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor_position = (position.x, position.y);
-                self.send(AppEvent::MouseMoved(
-                    position.x,
-                    position.y,
-                    self.current_modifiers(),
-                ));
+                // winit has no separate drag event; while the left button is
+                // held, report movement as a drag (matches macOS mouseDragged)
+                // so tab reorder / selection / scrollbar dragging work.
+                if self.mouse_left_pressed {
+                    self.send(AppEvent::MouseDragged(position.x, position.y));
+                } else {
+                    self.send(AppEvent::MouseMoved(
+                        position.x,
+                        position.y,
+                        self.current_modifiers(),
+                    ));
+                }
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 if button == MouseButton::Left {
                     let (x, y) = self.cursor_position;
                     match state {
                         ElementState::Pressed => {
+                            self.mouse_left_pressed = true;
                             self.send(AppEvent::MouseDown(x, y, self.current_modifiers()));
                         }
                         ElementState::Released => {
+                            self.mouse_left_pressed = false;
                             self.send(AppEvent::MouseUp(x, y));
                         }
                     }
@@ -348,6 +358,7 @@ pub fn run(
         sender: None,
         modifiers: ModifiersState::empty(),
         cursor_position: (0.0, 0.0),
+        mouse_left_pressed: false,
         ime_composing: false,
     };
     event_loop.run_app(&mut app).expect("run linux event loop");
