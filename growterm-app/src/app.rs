@@ -628,6 +628,9 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                         let cols = (w as f32 / cw).floor().max(1.0) as u16;
                         let term_rows = tabs.term_rows(h, ch, drawer.tab_bar_height(), title_bar_height);
                         resize_all_tabs(&mut tabs, cols, term_rows);
+                        // Persist the new size so the next launch keeps it
+                        config.font_size = font_size;
+                        config.save();
                         do_render!();
                         continue;
                     }
