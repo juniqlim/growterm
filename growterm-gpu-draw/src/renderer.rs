@@ -5,21 +5,6 @@ use unicode_width::UnicodeWidthChar;
 
 use crate::atlas::GlyphAtlas;
 
-#[cfg(target_os = "macos")]
-use std::sync::Mutex;
-#[cfg(target_os = "macos")]
-pub static GLYPH_LOG: std::sync::LazyLock<Mutex<Option<std::fs::File>>> = std::sync::LazyLock::new(|| {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    let dir = std::path::PathBuf::from(home).join("Library/Logs/growterm");
-    let _ = std::fs::create_dir_all(&dir);
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(dir.join("glyph.log"))
-        .ok();
-    Mutex::new(file)
-});
-
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct BgVertex {

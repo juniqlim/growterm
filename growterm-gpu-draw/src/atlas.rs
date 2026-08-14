@@ -1,11 +1,6 @@
 use std::collections::HashMap;
-#[cfg(target_os = "macos")]
-use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
-
-#[cfg(target_os = "macos")]
-use crate::renderer::GLYPH_LOG;
 
 #[cfg(target_os = "macos")]
 use core_foundation::array::CFArray;
@@ -226,11 +221,6 @@ impl GlyphAtlas {
         for (path, font) in &self.system_font_cache {
             if font.lookup_glyph_index(c) != 0 {
                 self.char_to_font_path.insert(c, path.clone());
-                if let Ok(mut guard) = GLYPH_LOG.lock() {
-                    if let Some(f) = guard.as_mut() {
-                        let _ = writeln!(f, "[font-cache] hit '{}' (U+{:04X}) in {:?}", c, c as u32, path);
-                    }
-                }
                 return true;
             }
         }
@@ -277,7 +267,6 @@ impl GlyphAtlas {
                             }
                             continue;
                         }
-                        let read_start = std::time::Instant::now();
                         if let Ok(data) = std::fs::read(&path) {
                             let settings = fontdue::FontSettings {
                                 scale: self.size,
@@ -290,12 +279,6 @@ impl GlyphAtlas {
                                 }
                                 // Cache font regardless of whether it has this glyph,
                                 // to avoid re-reading the same font file from disk.
-                                if let Ok(mut guard) = GLYPH_LOG.lock() {
-                                    if let Some(f) = guard.as_mut() {
-                                        let _ = writeln!(f, "[font-disk] read+parse {:?} for '{}' (U+{:04X}) glyph={} {:.1}ms",
-                                            path_buf, c, c as u32, has_glyph, read_start.elapsed().as_secs_f64() * 1000.0);
-                                    }
-                                }
                                 self.system_font_cache.insert(path_buf, font);
                                 if has_glyph {
                                     return true;
