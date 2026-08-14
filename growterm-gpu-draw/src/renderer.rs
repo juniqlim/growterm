@@ -111,7 +111,7 @@ fn push_glyph_quad(
     verts.push(GlyphVertex { position: [gx, gy + gh], tex_coords: [region.u0, region.v1], color });
 }
 
-const TAB_FONT_SIZE: f32 = 24.0;
+const TAB_FONT_SIZE: f32 = 16.0;
 const TAB_BAR_PADDING: f32 = 8.0;
 
 /// Tab bar rendering info passed from the app layer.
