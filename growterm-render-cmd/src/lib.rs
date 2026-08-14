@@ -24,60 +24,25 @@ impl Default for TerminalPalette {
     }
 }
 
-// 256-color palette (indices 0..=255)
+// 16-color ANSI palette (Tango / Ubuntu default). Pure primaries look
+// fluorescent, so use the softer, familiar Tango values instead.
 const ANSI_COLORS: [Rgb; 16] = [
-    Rgb { r: 0, g: 0, b: 0 },   // 0  black
-    Rgb { r: 204, g: 0, b: 0 }, // 1  red
-    Rgb { r: 0, g: 204, b: 0 }, // 2  green
-    Rgb {
-        r: 204,
-        g: 204,
-        b: 0,
-    }, // 3  yellow
-    Rgb { r: 0, g: 0, b: 204 }, // 4  blue
-    Rgb {
-        r: 204,
-        g: 0,
-        b: 204,
-    }, // 5  magenta
-    Rgb {
-        r: 0,
-        g: 204,
-        b: 204,
-    }, // 6  cyan
-    Rgb {
-        r: 204,
-        g: 204,
-        b: 204,
-    }, // 7  white
-    Rgb {
-        r: 128,
-        g: 128,
-        b: 128,
-    }, // 8  bright black
-    Rgb { r: 255, g: 0, b: 0 }, // 9  bright red
-    Rgb { r: 0, g: 255, b: 0 }, // 10 bright green
-    Rgb {
-        r: 255,
-        g: 255,
-        b: 0,
-    }, // 11 bright yellow
-    Rgb { r: 0, g: 0, b: 255 }, // 12 bright blue
-    Rgb {
-        r: 255,
-        g: 0,
-        b: 255,
-    }, // 13 bright magenta
-    Rgb {
-        r: 0,
-        g: 255,
-        b: 255,
-    }, // 14 bright cyan
-    Rgb {
-        r: 255,
-        g: 255,
-        b: 255,
-    }, // 15 bright white
+    Rgb { r: 46, g: 52, b: 54 },    // 0  black
+    Rgb { r: 204, g: 0, b: 0 },     // 1  red
+    Rgb { r: 78, g: 154, b: 6 },    // 2  green
+    Rgb { r: 196, g: 160, b: 0 },   // 3  yellow
+    Rgb { r: 52, g: 101, b: 164 },  // 4  blue
+    Rgb { r: 117, g: 80, b: 123 },  // 5  magenta
+    Rgb { r: 6, g: 152, b: 154 },   // 6  cyan
+    Rgb { r: 211, g: 215, b: 207 }, // 7  white
+    Rgb { r: 85, g: 87, b: 83 },    // 8  bright black
+    Rgb { r: 239, g: 41, b: 41 },   // 9  bright red
+    Rgb { r: 138, g: 226, b: 52 },  // 10 bright green
+    Rgb { r: 252, g: 233, b: 79 },  // 11 bright yellow
+    Rgb { r: 114, g: 159, b: 207 }, // 12 bright blue
+    Rgb { r: 173, g: 127, b: 168 }, // 13 bright magenta
+    Rgb { r: 52, g: 226, b: 226 },  // 14 bright cyan
+    Rgb { r: 238, g: 238, b: 236 }, // 15 bright white
 ];
 
 fn resolve_color(color: Color, default: Rgb) -> Rgb {
@@ -299,7 +264,7 @@ mod tests {
         };
         let cmds = generate(&vec![vec![cell]], None, None, None);
         assert_eq!(cmds[0].fg, Rgb::new(204, 0, 0));
-        assert_eq!(cmds[0].bg, Rgb::new(0, 0, 204));
+        assert_eq!(cmds[0].bg, Rgb::new(52, 101, 164));
     }
 
     #[test]
@@ -695,8 +660,8 @@ mod tests {
             flags: CellFlags::BOLD,
         };
         let cmds = generate(&vec![vec![cell]], None, None, None);
-        // BOLD + Indexed(1) → Indexed(9) = bright red (255,0,0)
-        assert_eq!(cmds[0].fg, Rgb::new(255, 0, 0));
+        // BOLD + Indexed(1) → Indexed(9) = bright red (239,41,41)
+        assert_eq!(cmds[0].fg, Rgb::new(239, 41, 41));
     }
 
     #[test]
@@ -709,7 +674,7 @@ mod tests {
             flags: CellFlags::BOLD,
         };
         let cmds = generate(&vec![vec![cell]], None, None, None);
-        assert_eq!(cmds[0].fg, Rgb::new(255, 0, 0));
+        assert_eq!(cmds[0].fg, Rgb::new(239, 41, 41));
     }
 
     #[test]
