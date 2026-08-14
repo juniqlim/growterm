@@ -390,6 +390,11 @@ fn start_io_thread(
                                 );
                                 responses.push(response);
                             }
+                            TerminalControl::SetClipboard(text) => {
+                                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                    let _ = clipboard.set_text(text);
+                                }
+                            }
                             TerminalControl::KittyKeyboardPush(_)
                             | TerminalControl::KittyKeyboardPop(_)
                             | TerminalControl::KittyKeyboardSet(_, _) => {
@@ -465,9 +470,10 @@ enum TerminalQuery {
     RequestStatusStringSgr,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum TerminalControl {
     Query(TerminalQuery),
+    SetClipboard(String),
     KittyKeyboardPush(u16),
     KittyKeyboardPop(u16),
     KittyKeyboardSet(u16, u8),
@@ -687,6 +693,22 @@ fn extract_terminal_controls(pending: &mut Vec<u8>) -> Vec<TerminalControl> {
             i += 7;
             continue;
         }
+        if rest.starts_with(b"\x1b]52;") {
+            match find_osc_terminator(rest) {
+                Some((terminator_index, terminator_len)) => {
+                    if let Some(text) = parse_osc_clipboard_set(&rest[5..terminator_index]) {
+                        controls.push(TerminalControl::SetClipboard(text));
+                    }
+                    i += terminator_index + terminator_len;
+                    continue;
+                }
+                None => {
+                    keep_from = Some(i);
+                    break;
+                }
+            }
+        }
+
         if rest.starts_with(b"\x1b]10;") || rest.starts_with(b"\x1b]11;") {
             match parse_osc_default_color_control(rest) {
                 SequenceParse::Matched(control, consumed) => {
@@ -768,7 +790,51 @@ fn is_known_control_prefix(rest: &[u8]) -> bool {
     .any(|pat| pat.starts_with(rest))
         || b"\x1b]10;".starts_with(rest)
         || b"\x1b]11;".starts_with(rest)
+        || b"\x1b]52;".starts_with(rest)
         || is_kitty_keyboard_control_prefix(rest)
+}
+
+/// Parse an OSC 52 payload (`<targets>;<data>`) into the clipboard text to set.
+/// Returns `None` for read requests (`?`) or malformed/undecodable data, so the
+/// caller consumes the sequence without changing the clipboard.
+fn parse_osc_clipboard_set(payload: &[u8]) -> Option<String> {
+    let sep = payload.iter().position(|&b| b == b';')?;
+    let data = &payload[sep + 1..];
+    if data == b"?" {
+        return None;
+    }
+    let bytes = base64_decode(data)?;
+    String::from_utf8(bytes).ok()
+}
+
+/// Decode standard base64 (alphabet `A-Za-z0-9+/`). Padding and whitespace are
+/// ignored. Returns `None` on any invalid character.
+fn base64_decode(input: &[u8]) -> Option<Vec<u8>> {
+    fn val(c: u8) -> Option<u8> {
+        match c {
+            b'A'..=b'Z' => Some(c - b'A'),
+            b'a'..=b'z' => Some(c - b'a' + 26),
+            b'0'..=b'9' => Some(c - b'0' + 52),
+            b'+' => Some(62),
+            b'/' => Some(63),
+            _ => None,
+        }
+    }
+    let mut out = Vec::new();
+    let mut buf = 0u32;
+    let mut bits = 0u32;
+    for &c in input {
+        if c == b'=' || c.is_ascii_whitespace() {
+            continue;
+        }
+        buf = (buf << 6) | val(c)? as u32;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buf >> bits) as u8);
+        }
+    }
+    Some(out)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1319,6 +1385,52 @@ mod tests {
             ]
         );
         assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn extract_terminal_controls_detects_osc52_set_clipboard_with_bel() {
+        // "hello" base64 = aGVsbG8=
+        let mut pending = b"\x1b]52;c;aGVsbG8=\x07".to_vec();
+        let controls = extract_terminal_controls(&mut pending);
+        assert_eq!(
+            controls,
+            vec![TerminalControl::SetClipboard("hello".to_string())]
+        );
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn extract_terminal_controls_detects_osc52_set_clipboard_with_st() {
+        let mut pending = b"\x1b]52;c;aGVsbG8=\x1b\\".to_vec();
+        let controls = extract_terminal_controls(&mut pending);
+        assert_eq!(
+            controls,
+            vec![TerminalControl::SetClipboard("hello".to_string())]
+        );
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn extract_terminal_controls_ignores_osc52_read_request() {
+        let mut pending = b"\x1b]52;c;?\x07".to_vec();
+        let controls = extract_terminal_controls(&mut pending);
+        assert!(controls.is_empty());
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn extract_terminal_controls_keeps_partial_osc52() {
+        let mut pending = b"\x1b]52;c;aGVsbG8=".to_vec();
+        let controls = extract_terminal_controls(&mut pending);
+        assert!(controls.is_empty());
+        assert_eq!(pending, b"\x1b]52;c;aGVsbG8=");
+    }
+
+    #[test]
+    fn base64_decode_handles_padding() {
+        assert_eq!(base64_decode(b"aGVsbG8=").unwrap(), b"hello");
+        assert_eq!(base64_decode(b"Zm9vYmFy").unwrap(), b"foobar");
+        assert_eq!(base64_decode(b"YQ==").unwrap(), b"a");
     }
 
     #[test]
