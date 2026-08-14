@@ -1,7 +1,9 @@
 mod atlas;
+mod platform_font;
 mod renderer;
 
 pub use atlas::GlyphAtlas;
+pub use platform_font::FontCandidates;
 pub use renderer::{GpuDrawer, TabBarInfo};
 
 #[cfg(test)]

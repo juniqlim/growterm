@@ -2,16 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-#[cfg(target_os = "macos")]
-use core_foundation::array::CFArray;
-#[cfg(target_os = "macos")]
-use core_foundation::base::TCFType;
-#[cfg(target_os = "macos")]
-use core_foundation::string::CFString;
-#[cfg(target_os = "macos")]
-use core_text::font as ct_font;
-#[cfg(target_os = "macos")]
-use core_text::font::CTFontRef;
+use crate::platform_font::{self, FontCandidates};
 
 pub struct RasterizedGlyph {
     pub width: u32,
@@ -34,15 +25,25 @@ pub struct GlyphAtlas {
     cell_width: f32,
     cell_height: f32,
     ascent: f32,
+    /// How the OS is asked for fallback font files. Swapped in tests.
+    font_candidates: FontCandidates,
 }
 
 impl GlyphAtlas {
     pub fn new(size: f32, font_path: Option<&str>) -> Self {
+        Self::with_candidates(size, font_path, platform_font::candidates)
+    }
+
+    /// Same as `new`, with the OS font lookup supplied by the caller.
+    pub fn with_candidates(size: f32, font_path: Option<&str>, font_candidates: FontCandidates) -> Self {
         let font = Arc::new(Self::load_font(size, font_path));
         let fallback_font = Arc::new(Self::load_fallback_font(size));
         let bold_font = Arc::new(Self::load_builtin_bold_font(size));
         let bold_fallback_font = Arc::new(Self::load_fallback_bold_font(size));
-        Self::with_shared_fonts(size, font, fallback_font, bold_font, bold_fallback_font)
+        let mut atlas =
+            Self::with_shared_fonts(size, font, fallback_font, bold_font, bold_fallback_font);
+        atlas.font_candidates = font_candidates;
+        atlas
     }
 
     pub fn with_shared_fonts(size: f32, font: Arc<fontdue::Font>, fallback_font: Arc<fontdue::Font>, bold_font: Arc<fontdue::Font>, bold_fallback_font: Arc<fontdue::Font>) -> Self {
@@ -66,6 +67,7 @@ impl GlyphAtlas {
             cell_width: metrics.advance_width.ceil(),
             cell_height: cell_height.ceil(),
             ascent,
+            font_candidates: platform_font::candidates,
         }
     }
 
@@ -165,132 +167,48 @@ impl GlyphAtlas {
         self.ascent
     }
 
-    /// Locate a system font that covers `c` via fontconfig (`fc-match`).
-    /// Loads and caches it so `get_or_insert` can rasterize the glyph.
-    /// Color-emoji fonts (CBDT/COLR) that fontdue can't outline are rejected.
-    #[cfg(not(target_os = "macos"))]
-    fn find_system_font(&mut self, c: char) -> bool {
-        if let Some(path) = self.char_to_font_path.get(&c) {
-            return self.system_font_cache.contains_key(path);
-        }
-
-        let output = std::process::Command::new("fc-match")
-            .arg("--format=%{file}")
-            .arg(format!(":charset={:x}", c as u32))
-            .output();
-        let path = match output {
-            Ok(o) if o.status.success() => {
-                let p = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                if p.is_empty() {
-                    return false;
-                }
-                PathBuf::from(p)
-            }
-            _ => return false,
-        };
-
-        if !self.system_font_cache.contains_key(&path) {
-            let Ok(data) = std::fs::read(&path) else {
-                return false;
-            };
-            let settings = fontdue::FontSettings {
-                scale: self.size,
-                ..Default::default()
-            };
-            let Ok(font) = fontdue::Font::from_bytes(data, settings) else {
-                return false;
-            };
-            self.system_font_cache.insert(path.clone(), font);
-        }
-
-        // fc-match always returns some font; accept only if it truly covers c.
-        if self.system_font_cache.get(&path).unwrap().lookup_glyph_index(c) == 0 {
-            return false;
-        }
-        self.char_to_font_path.insert(c, path);
-        true
-    }
-
-    #[cfg(target_os = "macos")]
+    /// Locate a system font that covers `c` and cache it so `get_or_insert`
+    /// can rasterize the glyph. The OS only supplies candidate paths; coverage
+    /// is verified here because a candidate may not actually contain `c`
+    /// (fontconfig always answers, and color-emoji fonts fontdue cannot
+    /// outline are rejected at load).
     fn find_system_font(&mut self, c: char) -> bool {
         if self.char_to_font_path.contains_key(&c) {
             return true;
         }
 
-        // Check if any already-cached font has this glyph
+        // An already-loaded font may cover it, which saves asking the OS.
         for (path, font) in &self.system_font_cache {
             if font.lookup_glyph_index(c) != 0 {
-                self.char_to_font_path.insert(c, path.clone());
+                let path = path.clone();
+                self.char_to_font_path.insert(c, path);
                 return true;
             }
         }
 
-        let base = ct_font::new_from_name("Helvetica", self.size as f64)
-            .expect("failed to create CT font");
-        let langs: CFArray<CFString> = CFArray::from_CFTypes(&[]);
-        let cascade = ct_font::cascade_list_for_languages(&base, &langs);
-
-        let mut utf16_buf = [0u16; 2];
-        let utf16 = c.encode_utf16(&mut utf16_buf);
-        let mut glyph_buf = [0u16; 2];
-
-        for i in 0..cascade.len() {
-            let descriptor = cascade.get(i).unwrap();
-            let candidate = ct_font::new_from_descriptor(&descriptor, self.size as f64);
-
-            let found = unsafe {
-                extern "C" {
-                    fn CTFontGetGlyphsForCharacters(
-                        font: CTFontRef,
-                        characters: *const u16,
-                        glyphs: *mut u16,
-                        count: isize,
-                    ) -> bool;
-                }
-                CTFontGetGlyphsForCharacters(
-                    candidate.as_concrete_TypeRef(),
-                    utf16.as_ptr(),
-                    glyph_buf.as_mut_ptr(),
-                    utf16.len() as isize,
-                )
-            };
-
-            if found && glyph_buf[0] != 0 {
-                if let Some(url) = candidate.url() {
-                    if let Some(path) = url.to_path() {
-                        let path_buf = path.to_path_buf();
-                        // Reuse already-loaded font for this path
-                        if let Some(font) = self.system_font_cache.get(&path_buf) {
-                            if font.lookup_glyph_index(c) != 0 {
-                                self.char_to_font_path.insert(c, path_buf);
-                                return true;
-                            }
-                            continue;
-                        }
-                        if let Ok(data) = std::fs::read(&path) {
-                            let settings = fontdue::FontSettings {
-                                scale: self.size,
-                                ..Default::default()
-                            };
-                            if let Ok(font) = fontdue::Font::from_bytes(data, settings) {
-                                let has_glyph = font.lookup_glyph_index(c) != 0;
-                                if has_glyph {
-                                    self.char_to_font_path.insert(c, path_buf.clone());
-                                }
-                                // Cache font regardless of whether it has this glyph,
-                                // to avoid re-reading the same font file from disk.
-                                self.system_font_cache.insert(path_buf, font);
-                                if has_glyph {
-                                    return true;
-                                }
-                            }
-                        }
-                    }
-                }
+        for path in (self.font_candidates)(c, self.size) {
+            if !self.system_font_cache.contains_key(&path) {
+                let Ok(data) = std::fs::read(&path) else {
+                    continue;
+                };
+                let settings = fontdue::FontSettings {
+                    scale: self.size,
+                    ..Default::default()
+                };
+                let Ok(font) = fontdue::Font::from_bytes(data, settings) else {
+                    continue;
+                };
+                // Cache regardless of coverage, to avoid re-reading the file.
+                self.system_font_cache.insert(path.clone(), font);
+            }
+            if self.system_font_cache[&path].lookup_glyph_index(c) != 0 {
+                self.char_to_font_path.insert(c, path);
+                return true;
             }
         }
         false
     }
+
 
     /// fontdue는 힌팅/스템 다크닝이 없어 안티앨리어싱 획이 얇고 흐리게(뿌옇게) 보인다.
     /// 커버리지에 감마(<1.0) 곡선을 적용해 부분 커버리지 픽셀을 진하게 만들어,
@@ -446,6 +364,55 @@ mod tests {
         let bold_bitmap = bold.bitmap.clone();
 
         assert_ne!(normal_bitmap, bold_bitmap, "Bold cached glyph should differ from normal");
+    }
+
+    // System font lookup used to have one implementation per OS, so neither
+    // could be tested off its own platform. The OS now only supplies candidate
+    // paths; these cover the caching and coverage logic on any machine.
+
+    const HANGUL_FONT: &str = "fonts/D2Coding.ttc";
+    const LATIN_ONLY_FONT: &str = "fonts/FiraCodeNerdFontMono-Retina.ttf";
+
+    fn atlas_with(candidates: FontCandidates) -> GlyphAtlas {
+        GlyphAtlas::with_candidates(16.0, None, candidates)
+    }
+
+    #[test]
+    fn find_system_font_fails_when_the_os_offers_nothing() {
+        let mut atlas = atlas_with(|_, _| Vec::new());
+        assert!(!atlas.find_system_font('가'));
+    }
+
+    #[test]
+    fn find_system_font_accepts_a_candidate_covering_the_char() {
+        let mut atlas = atlas_with(|_, _| vec![PathBuf::from(HANGUL_FONT)]);
+        assert!(atlas.find_system_font('가'));
+        assert_eq!(atlas.char_to_font_path.get(&'가'), Some(&PathBuf::from(HANGUL_FONT)));
+    }
+
+    #[test]
+    fn find_system_font_skips_a_candidate_missing_the_glyph() {
+        let mut atlas = atlas_with(|_, _| {
+            vec![PathBuf::from(LATIN_ONLY_FONT), PathBuf::from(HANGUL_FONT)]
+        });
+        assert!(atlas.find_system_font('가'));
+        assert_eq!(atlas.char_to_font_path.get(&'가'), Some(&PathBuf::from(HANGUL_FONT)));
+    }
+
+    #[test]
+    fn find_system_font_ignores_a_candidate_that_cannot_be_read() {
+        let mut atlas = atlas_with(|_, _| vec![PathBuf::from("/nonexistent/font.ttf")]);
+        assert!(!atlas.find_system_font('가'));
+    }
+
+    #[test]
+    fn find_system_font_reuses_an_already_loaded_font() {
+        let mut atlas = atlas_with(|_, _| vec![PathBuf::from(HANGUL_FONT)]);
+        assert!(atlas.find_system_font('가'));
+
+        // The OS is not consulted again: this would panic if it were.
+        atlas.font_candidates = |_, _| panic!("should not ask the OS again");
+        assert!(atlas.find_system_font('힣'));
     }
 }
 
