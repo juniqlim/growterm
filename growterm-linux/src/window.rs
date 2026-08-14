@@ -227,11 +227,10 @@ where
                 let mut modifiers = self.current_modifiers();
 
                 // GNOME/X11 grabs and reorders the Super key, so Linux app
-                // shortcuts use Ctrl(+Shift). Remap them to the SUPER-based
+                // shortcuts use Ctrl(+Shift)/Alt. Remap them to the SUPER-based
                 // shortcut handlers shared with macOS.
-                if modifiers.contains(Modifiers::CONTROL) {
+                {
                     use crate::key_convert::keycode as kc;
-                    let shift = modifiers.contains(Modifiers::SHIFT);
                     let is_digit = |k: u16| {
                         matches!(
                             k,
@@ -246,16 +245,24 @@ where
                                 | kc::ANSI_9
                         )
                     };
-                    let is_shortcut = match keycode {
-                        // Ctrl+= / Ctrl+- : zoom; Ctrl+1~9 : switch tab by number
-                        Some(k) if !shift => {
-                            k == kc::ANSI_EQUAL || k == kc::ANSI_MINUS || is_digit(k)
+                    if modifiers.contains(Modifiers::CONTROL) {
+                        let shift = modifiers.contains(Modifiers::SHIFT);
+                        let is_shortcut = match keycode {
+                            // Ctrl+= / Ctrl+- : zoom
+                            Some(k) if !shift => k == kc::ANSI_EQUAL || k == kc::ANSI_MINUS,
+                            // Ctrl+Shift+N/T new window/tab, Ctrl+Shift+W close tab
+                            Some(k) => k == kc::ANSI_N || k == kc::ANSI_T || k == kc::ANSI_W,
+                            None => false,
+                        };
+                        if is_shortcut {
+                            modifiers.remove(Modifiers::CONTROL | Modifiers::SHIFT);
+                            modifiers.insert(Modifiers::SUPER);
                         }
-                        Some(k) => k == kc::ANSI_N || k == kc::ANSI_T || k == kc::ANSI_W,
-                        None => false,
-                    };
-                    if is_shortcut {
-                        modifiers.remove(Modifiers::CONTROL | Modifiers::SHIFT);
+                    } else if modifiers.contains(Modifiers::ALT)
+                        && keycode.map(is_digit).unwrap_or(false)
+                    {
+                        // Alt+1~9 : switch tab by number
+                        modifiers.remove(Modifiers::ALT);
                         modifiers.insert(Modifiers::SUPER);
                     }
                 }
