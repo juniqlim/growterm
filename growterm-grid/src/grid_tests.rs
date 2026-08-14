@@ -1477,3 +1477,27 @@ fn resize_in_alt_screen_does_not_corrupt_visible_cells() {
     let first_row_text: String = vis[0].iter().map(|c| c.character).collect::<String>();
     assert!(!first_row_text.contains("primary"), "primary scrollback leaked into alt screen visible cells");
 }
+
+// === Resize: rows restored from scrollback must match new column width ===
+
+#[test]
+fn resize_expand_cols_widens_rows_restored_from_scrollback() {
+    let mut grid = Grid::new(5, 3);
+    // Push several rows into scrollback at the small (width 5) size
+    for i in 0..10u8 {
+        grid.apply(&TerminalCommand::Print(char::from(b'a' + i)));
+        grid.apply(&TerminalCommand::Print('\n'));
+    }
+    assert!(!grid.scrollback.is_empty(), "scrollback should be populated");
+
+    // Expand both columns and rows: rows pulled back from scrollback to the
+    // top of the screen must be widened to the new column count.
+    grid.resize(12, 6);
+
+    for (i, row) in grid.cells().iter().enumerate() {
+        assert_eq!(row.len(), 12, "visible row {} not widened to new cols", i);
+    }
+
+    // Erasing at the cursor must not panic on a short row.
+    grid.apply(&TerminalCommand::EraseInLine(2));
+}

@@ -241,6 +241,11 @@ impl Grid {
 
         // Invariant: cells length must equal new_rows
         self.cells.resize(new_rows, vec![Cell::default(); new_cols]);
+        // Rows restored from scrollback during expansion keep their old width,
+        // so normalize every visible row to the new column count.
+        for row in &mut self.cells {
+            row.resize(new_cols, Cell::default());
+        }
         self.cols = new_cols;
         self.rows = new_rows;
         self.cursor_row = self.cursor_row.min(self.rows - 1);
