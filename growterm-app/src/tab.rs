@@ -48,11 +48,20 @@ pub struct TabBarInfo {
     pub active_index: usize,
 }
 
-/// Tab labels hint the switch shortcut: Cmd on macOS, Alt on Linux.
-#[cfg(target_os = "macos")]
-const TAB_SHORTCUT_PREFIX: &str = "⌘";
-#[cfg(not(target_os = "macos"))]
-const TAB_SHORTCUT_PREFIX: &str = "Alt";
+/// Tab label: the switch-shortcut hint for tabs 1-9, plus the response timer.
+/// `prefix` comes from the platform layer, which owns the key convention.
+fn tab_title(index: usize, prefix: &str, timer_text: Option<&str>) -> String {
+    let num = index + 1;
+    let label = if num <= 9 {
+        format!("{prefix}{num}")
+    } else {
+        num.to_string()
+    };
+    match timer_text {
+        Some(timer) => format!("{label} {timer}"),
+        None => label,
+    }
+}
 
 fn vt_capture_path_from_env_with(value: Option<std::ffi::OsString>) -> Option<PathBuf> {
     let path = value?;
@@ -262,17 +271,11 @@ impl TabManager {
                 .iter()
                 .enumerate()
                 .map(|(idx, tab)| {
-                    let num = idx + 1;
-                    let label = if num <= 9 {
-                        format!("{}{}", TAB_SHORTCUT_PREFIX, num)
-                    } else {
-                        format!("{}", num)
-                    };
-                    if let Some(timer_text) = tab.response_timer.display_text() {
-                        format!("{} {}", label, timer_text)
-                    } else {
-                        label
-                    }
+                    tab_title(
+                        idx,
+                        crate::platform::TAB_SHORTCUT_PREFIX,
+                        tab.response_timer.display_text().as_deref(),
+                    )
                 })
                 .collect(),
             active_index: self.active,
@@ -1351,9 +1354,31 @@ mod tests {
         mgr.add_tab(dummy_tab());
 
         let info = mgr.tab_bar_info();
-        let p = TAB_SHORTCUT_PREFIX;
+        let p = crate::platform::TAB_SHORTCUT_PREFIX;
         assert_eq!(info.titles, vec![format!("{p}1"), format!("{p}2")]);
         assert_eq!(info.active_index, 1);
+    }
+
+    // The shortcut prefix differs per platform, so tab_title takes it as an
+    // argument. Both platforms' labels are then verified on any machine.
+    #[test]
+    fn tab_title_prefixes_first_nine_tabs() {
+        assert_eq!(tab_title(0, "⌘", None), "⌘1");
+        assert_eq!(tab_title(0, "Alt", None), "Alt1");
+        assert_eq!(tab_title(8, "⌘", None), "⌘9");
+        assert_eq!(tab_title(8, "Alt", None), "Alt9");
+    }
+
+    #[test]
+    fn tab_title_omits_prefix_past_ninth_tab() {
+        assert_eq!(tab_title(9, "⌘", None), "10");
+        assert_eq!(tab_title(9, "Alt", None), "10");
+    }
+
+    #[test]
+    fn tab_title_appends_timer_text() {
+        assert_eq!(tab_title(0, "Alt", Some("1.2s")), "Alt1 1.2s");
+        assert_eq!(tab_title(9, "⌘", Some("3s")), "10 3s");
     }
 
     #[test]

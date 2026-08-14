@@ -10,6 +10,9 @@ pub use event::{AppEvent, KeyEventType, Modifiers};
 pub use key_convert::convert_key;
 pub use window::MacWindow;
 
+/// Tabs are switched with Cmd+1~9 here, so labels hint Cmd.
+pub const TAB_SHORTCUT_PREFIX: &str = "⌘";
+
 /// 통합 테스트용 헬퍼. 프로덕션 코드에서 사용하지 않음.
 #[doc(hidden)]
 pub mod test_support {
