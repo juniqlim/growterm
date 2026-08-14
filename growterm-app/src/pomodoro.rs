@@ -238,12 +238,7 @@ pub fn spawn_ai_coaching(
             }
             Ok(output) => {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                let msg = if stderr.trim().is_empty() {
-                    format!("AI 호출 실패: exit code {}", output.status)
-                } else {
-                    format!("AI 호출 실패: {}", stderr.trim())
-                };
-                vec![msg]
+                vec![failure_message(&stderr, &format!("exit code {}", output.status))]
             }
             Err(e) => {
                 vec![format!("AI 호출 실패: {e}")]
@@ -252,6 +247,22 @@ pub fn spawn_ai_coaching(
         save_coaching_file(&coaching_dir(), &lines);
         *ai_response.lock().unwrap() = Some(lines);
     });
+}
+
+/// Characters of stderr kept in a failure message.
+const MAX_ERROR_CHARS: usize = 200;
+
+/// A failing command can dump an entire minified bundle to stderr — running
+/// claude under an unsupported Node version does exactly that — so keep only
+/// the first line and cap its length.
+fn failure_message(stderr: &str, status_text: &str) -> String {
+    let first_line = stderr.trim().lines().next().unwrap_or("").trim();
+    if first_line.is_empty() {
+        return format!("AI 호출 실패: {status_text}");
+    }
+    let kept: String = first_line.chars().take(MAX_ERROR_CHARS).collect();
+    let ellipsis = if first_line.chars().count() > MAX_ERROR_CHARS { "…" } else { "" };
+    format!("AI 호출 실패: {kept}{ellipsis}")
 }
 
 fn find_claude_path() -> String {
@@ -666,5 +677,29 @@ mod tests {
     fn replace_bare_claude_noop_when_path_is_bare() {
         let cmd = "claude -p";
         assert_eq!(replace_bare_claude(cmd, "claude"), cmd);
+    }
+
+    #[test]
+    fn failure_message_falls_back_to_status_when_stderr_empty() {
+        assert_eq!(failure_message("   ", "exit code 1"), "AI 호출 실패: exit code 1");
+    }
+
+    #[test]
+    fn failure_message_keeps_short_stderr() {
+        assert_eq!(failure_message("command not found", "exit code 127"), "AI 호출 실패: command not found");
+    }
+
+    #[test]
+    fn failure_message_keeps_only_first_line() {
+        assert_eq!(failure_message("보이는 줄\n숨은 줄\n또 숨은 줄", "exit code 1"), "AI 호출 실패: 보이는 줄");
+    }
+
+    #[test]
+    fn failure_message_truncates_a_very_long_line() {
+        // A wrong Node version makes claude dump its whole minified bundle.
+        let msg = failure_message(&"x".repeat(100_000), "exit code 1");
+        assert!(msg.starts_with("AI 호출 실패: xxx"));
+        assert!(msg.ends_with('…'));
+        assert_eq!(msg.chars().count(), "AI 호출 실패: ".chars().count() + MAX_ERROR_CHARS + 1);
     }
 }
