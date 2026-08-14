@@ -232,9 +232,26 @@ where
                 if modifiers.contains(Modifiers::CONTROL) {
                     use crate::key_convert::keycode as kc;
                     let shift = modifiers.contains(Modifiers::SHIFT);
+                    let is_digit = |k: u16| {
+                        matches!(
+                            k,
+                            kc::ANSI_1
+                                | kc::ANSI_2
+                                | kc::ANSI_3
+                                | kc::ANSI_4
+                                | kc::ANSI_5
+                                | kc::ANSI_6
+                                | kc::ANSI_7
+                                | kc::ANSI_8
+                                | kc::ANSI_9
+                        )
+                    };
                     let is_shortcut = match keycode {
-                        Some(k) if !shift => k == kc::ANSI_EQUAL || k == kc::ANSI_MINUS,
-                        Some(k) => k == kc::ANSI_N || k == kc::ANSI_T,
+                        // Ctrl+= / Ctrl+- : zoom; Ctrl+1~9 : switch tab by number
+                        Some(k) if !shift => {
+                            k == kc::ANSI_EQUAL || k == kc::ANSI_MINUS || is_digit(k)
+                        }
+                        Some(k) => k == kc::ANSI_N || k == kc::ANSI_T || k == kc::ANSI_W,
                         None => false,
                     };
                     if is_shortcut {
