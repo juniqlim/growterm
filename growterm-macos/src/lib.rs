@@ -1,3 +1,7 @@
+// Everything here is AppKit. On other platforms this compiles to an empty
+// crate so the workspace still builds and tests there.
+#![cfg(target_os = "macos")]
+
 mod delegate;
 mod dispatch;
 pub mod event;

@@ -5,6 +5,12 @@ edition = "2021"
 
 [dependencies]
 growterm-types = { path = "../growterm-types" }
+raw-window-handle = "0.6"
+bitflags = "2"
+
+# Apple-only frameworks. Gating them keeps this crate buildable — as an empty
+# crate — on other platforms, so `cargo test` works across the workspace.
+[target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSString", "NSArray", "NSRange", "NSAttributedString", "NSThread", "NSNotification", "NSURL"] }
 objc2-app-kit = { version = "0.3", features = [
@@ -25,8 +31,6 @@ objc2-app-kit = { version = "0.3", features = [
     "NSPasteboardItem",
 ] }
 objc2-quartz-core = { version = "0.3", features = ["CAMetalLayer", "CALayer"] }
-raw-window-handle = "0.6"
-bitflags = "2"
 
 [[test]]
 name = "cmd_q_quit"
