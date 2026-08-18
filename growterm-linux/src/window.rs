@@ -152,6 +152,10 @@ where
     fn current_modifiers(&self) -> Modifiers {
         convert_modifiers(self.modifiers)
     }
+
+    fn mouse_modifiers(&self) -> Modifiers {
+        as_mouse_modifiers(self.current_modifiers())
+    }
 }
 
 impl<F> ApplicationHandler for GrowtermApp<F>
@@ -303,7 +307,7 @@ where
                     self.send(AppEvent::MouseMoved(
                         position.x,
                         position.y,
-                        self.current_modifiers(),
+                        self.mouse_modifiers(),
                     ));
                 }
             }
@@ -313,7 +317,7 @@ where
                     match state {
                         ElementState::Pressed => {
                             self.mouse_left_pressed = true;
-                            self.send(AppEvent::MouseDown(x, y, self.current_modifiers()));
+                            self.send(AppEvent::MouseDown(x, y, self.mouse_modifiers()));
                         }
                         ElementState::Released => {
                             self.mouse_left_pressed = false;
@@ -450,6 +454,17 @@ fn shortcut(
     None
 }
 
+/// growterm-app opens the URL under a Cmd+click. GNOME owns the Super key, so
+/// on Linux it is Ctrl that stands in — the same swap the keyboard already
+/// makes, and what other terminals here do.
+fn as_mouse_modifiers(modifiers: Modifiers) -> Modifiers {
+    if modifiers.contains(Modifiers::CONTROL) {
+        (modifiers - Modifiers::CONTROL) | Modifiers::SUPER
+    } else {
+        modifiers
+    }
+}
+
 fn convert_modifiers(modifiers: ModifiersState) -> Modifiers {
     let mut out = Modifiers::empty();
     if modifiers.shift_key() {
@@ -541,6 +556,29 @@ mod tests {
                 Modifiers::SUPER | Modifiers::SHIFT
             );
         }
+    }
+
+    #[test]
+    fn ctrl_click_stands_in_for_cmd_click() {
+        assert_eq!(
+            as_mouse_modifiers(Modifiers::CONTROL),
+            Modifiers::SUPER,
+            "GNOME keeps the Super key, so Ctrl is what a Linux user can press"
+        );
+    }
+
+    #[test]
+    fn ctrl_click_keeps_the_other_modifiers() {
+        assert_eq!(
+            as_mouse_modifiers(Modifiers::CONTROL | Modifiers::SHIFT),
+            Modifiers::SUPER | Modifiers::SHIFT
+        );
+    }
+
+    #[test]
+    fn a_plain_click_stays_plain() {
+        assert_eq!(as_mouse_modifiers(Modifiers::empty()), Modifiers::empty());
+        assert_eq!(as_mouse_modifiers(Modifiers::ALT), Modifiers::ALT);
     }
 
     #[test]
