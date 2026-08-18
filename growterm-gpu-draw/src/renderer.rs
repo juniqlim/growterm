@@ -1087,7 +1087,9 @@ impl GpuDrawer {
                     contents: bytemuck::cast_slice(&tint_verts),
                     usage: wgpu::BufferUsages::VERTEX,
                 });
-                pass.set_pipeline(&self.overlay_pipeline);
+                // bg, not overlay: the overlay shader cuts alpha to a third
+                // for the break screen, which would swallow the tint.
+                pass.set_pipeline(&self.bg_pipeline);
                 pass.set_bind_group(0, &self.uniform_bind_group, &[]);
                 pass.set_vertex_buffer(0, tint_buffer.slice(..));
                 pass.draw(0..tint_verts.len() as u32, 0..1);

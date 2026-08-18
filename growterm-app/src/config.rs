@@ -160,13 +160,13 @@ fn default_header_opacity() -> f32 {
 
 /// How far an unfocused window is dimmed, 0.0 (off) to 1.0 (the tint colour).
 fn default_unfocused_tint() -> f32 {
-    0.35
+    0.1
 }
 
-/// What an unfocused window is washed with. Amber reads as "not this one" at a
-/// glance, where a plain dim only reads as "harder to see".
+/// What an unfocused window is washed with. A colour reads as "not this one"
+/// at a glance, where a plain dim only reads as "harder to see".
 fn default_unfocused_tint_color() -> String {
-    "#ff8800".to_string()
+    "#cc0000".to_string()
 }
 
 fn default_true() -> bool {
@@ -591,7 +591,7 @@ mod unfocused_tint_tests {
     #[test]
     fn unfocused_tint_defaults_to_a_visible_wash() {
         let config: Config = toml::from_str("").unwrap();
-        assert_eq!(config.unfocused_tint, 0.35);
+        assert_eq!(config.unfocused_tint, 0.1);
     }
 
     #[test]
@@ -607,15 +607,15 @@ mod unfocused_tint_tests {
     }
 
     #[test]
-    fn unfocused_tint_colour_defaults_to_amber() {
+    fn unfocused_tint_colour_defaults_to_red() {
         let config: Config = toml::from_str("").unwrap();
-        assert_eq!(config.unfocused_tint_color, "#ff8800");
+        assert_eq!(config.unfocused_tint_color, "#cc0000");
     }
 
     #[test]
     fn unfocused_tint_colour_is_configurable() {
-        let config: Config = toml::from_str("unfocused_tint_color = \"#cc0000\"\n").unwrap();
-        assert_eq!(config.unfocused_tint_rgb(), [0.8, 0.0, 0.0]);
+        let config: Config = toml::from_str("unfocused_tint_color = \"#ff8800\"\n").unwrap();
+        assert_eq!(config.unfocused_tint_rgb(), [1.0, 0x88 as f32 / 255.0, 0.0]);
     }
 
     #[test]
@@ -633,7 +633,7 @@ mod unfocused_tint_tests {
     #[test]
     fn an_unreadable_colour_falls_back_to_the_default() {
         let config: Config = toml::from_str("unfocused_tint_color = \"not a colour\"\n").unwrap();
-        assert_eq!(config.unfocused_tint_rgb(), [1.0, 0x88 as f32 / 255.0, 0.0]);
+        assert_eq!(config.unfocused_tint_rgb(), [0.8, 0.0, 0.0]);
     }
 }
 
