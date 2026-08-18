@@ -1366,9 +1366,20 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
 /// Hand a URL to the desktop's handler. The command differs per platform,
 /// so the platform layer names it.
 fn open_url(url: &str) {
-    let _ = std::process::Command::new(crate::platform::URL_OPENER)
+    if let Ok(child) = std::process::Command::new(crate::platform::URL_OPENER)
         .arg(url)
-        .spawn();
+        .spawn()
+    {
+        reap_in_background(child);
+    }
+}
+
+/// Wait on a child we otherwise ignore. Without this it lingers as a zombie
+/// for as long as the window that spawned it stays open.
+fn reap_in_background(mut child: std::process::Child) {
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
 }
 
 fn spawn_new_window() {
@@ -1379,12 +1390,17 @@ fn spawn_new_window() {
     if let Some(idx) = exe_str.find(".app/") {
         // Inside .app bundle — use `open -n` to launch a new instance
         let app_path = &exe_str[..idx + 4]; // include ".app"
-        let _ = std::process::Command::new("open")
+        if let Ok(child) = std::process::Command::new("open")
             .args(["-n", app_path])
-            .spawn();
+            .spawn()
+        {
+            reap_in_background(child);
+        }
     } else {
         // Dev environment — run binary directly
-        let _ = std::process::Command::new(exe).spawn();
+        if let Ok(child) = std::process::Command::new(exe).spawn() {
+            reap_in_background(child);
+        }
     }
 }
 
@@ -1653,6 +1669,24 @@ fn render_with_tabs(drawer: &mut GpuDrawer, tabs: &TabManager, preedit: &str, se
 mod tests {
     use super::*;
     use growterm_types::TerminalCommand;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_spawned_child_leaves_no_zombie_behind() {
+        let child = std::process::Command::new("true").spawn().unwrap();
+        let pid = child.id();
+
+        reap_in_background(child);
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            if std::fs::read_to_string(format!("/proc/{pid}/stat")).is_err() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("child {pid} is still there — nobody waited on it");
+    }
 
     #[test]
     fn shell_escape_plain_path() {
