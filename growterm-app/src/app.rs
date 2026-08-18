@@ -1270,6 +1270,11 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                 pomodoro.set_coaching(coaching_enabled);
                 config.save();
                 window.set_coaching_checked(coaching_enabled);
+                if let Some(title) =
+                    maybe_remember_title_update(&mut last_title, build_title(&pomodoro, &tabs))
+                {
+                    window.set_title(&title);
+                }
             }
             AppEvent::ToggleTransparentTabBar => {
                 transparent_tab_bar = !transparent_tab_bar;

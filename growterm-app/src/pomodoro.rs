@@ -176,18 +176,21 @@ impl Pomodoro {
         }
         let started = self.started_at?;
         let elapsed = now.duration_since(started).as_secs();
+        // Linux has no menu bar to tick, so coaching shows itself here or
+        // nowhere at all.
+        let coaching_mark = if self.coaching { " \u{1F9E0}" } else { "" };
         match self.phase {
             Phase::Working => {
                 let remaining = self.work_secs.saturating_sub(elapsed);
                 let m = remaining / 60;
                 let s = remaining % 60;
-                Some(format!("\u{1F345} {m:02}:{s:02}"))
+                Some(format!("\u{1F345} {m:02}:{s:02}{coaching_mark}"))
             }
             Phase::Break => {
                 let remaining = self.break_secs.saturating_sub(elapsed);
                 let m = remaining / 60;
                 let s = remaining % 60;
-                Some(format!("\u{2615} {m:02}:{s:02}"))
+                Some(format!("\u{2615} {m:02}:{s:02}{coaching_mark}"))
             }
             Phase::Idle => None,
         }
@@ -524,6 +527,45 @@ mod tests {
         let text = p.display_text_at(now + Duration::from_secs(30)).unwrap();
         assert!(text.starts_with('\u{1F345}')); // 🍅
         assert!(text.contains("24:30"));
+    }
+
+    /// Linux has no menu to tick, so the title is the only place coaching can
+    /// show itself.
+    #[test]
+    fn display_text_marks_coaching_while_working() {
+        let mut p = enabled_pomodoro();
+        let now = Instant::now();
+        p.on_input_at(now, &[(0, 0)]);
+        p.set_coaching(true);
+
+        let text = p.display_text_at(now + Duration::from_secs(30)).unwrap();
+        assert!(text.contains('\u{1F9E0}'), "expected the coaching mark in {text:?}"); // 🧠
+    }
+
+    #[test]
+    fn display_text_drops_the_mark_when_coaching_is_off() {
+        let mut p = enabled_pomodoro();
+        let now = Instant::now();
+        p.on_input_at(now, &[(0, 0)]);
+        p.set_coaching(false);
+
+        let text = p.display_text_at(now + Duration::from_secs(30)).unwrap();
+        assert!(!text.contains('\u{1F9E0}'), "did not expect the coaching mark in {text:?}");
+        assert!(text.contains("24:30"));
+    }
+
+    #[test]
+    fn display_text_marks_coaching_during_break() {
+        let mut p = enabled_pomodoro();
+        let now = Instant::now();
+        p.on_input_at(now, &[(0, 0)]);
+        p.set_coaching(true);
+
+        let break_start = now + Duration::from_secs(DEFAULT_WORK_SECS);
+        p.tick_at(break_start);
+
+        let text = p.display_text_at(break_start + Duration::from_secs(15)).unwrap();
+        assert!(text.contains('\u{1F9E0}'), "expected the coaching mark in {text:?}");
     }
 
     #[test]
