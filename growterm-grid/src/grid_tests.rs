@@ -1501,3 +1501,63 @@ fn resize_expand_cols_widens_rows_restored_from_scrollback() {
     // Erasing at the cursor must not panic on a short row.
     grid.apply(&TerminalCommand::EraseInLine(2));
 }
+
+// === Resizing while the alt screen is up ===
+
+#[test]
+fn leaving_alt_screen_after_growing_matches_the_new_size() {
+    let mut grid = Grid::new(20, 5);
+    grid.apply(&TerminalCommand::EnterAltScreen);
+    grid.resize(30, 12);
+    grid.apply(&TerminalCommand::LeaveAltScreen);
+
+    assert_eq!(grid.cells().len(), 12);
+    for row in grid.cells() {
+        assert_eq!(row.len(), 30);
+    }
+}
+
+#[test]
+fn leaving_alt_screen_after_shrinking_matches_the_new_size() {
+    let mut grid = Grid::new(30, 12);
+    grid.apply(&TerminalCommand::EnterAltScreen);
+    grid.resize(20, 5);
+    grid.apply(&TerminalCommand::LeaveAltScreen);
+
+    assert_eq!(grid.cells().len(), 5);
+    for row in grid.cells() {
+        assert_eq!(row.len(), 20);
+    }
+}
+
+/// The restored cursor was saved against the old size, and erasing indexes the
+/// grid by it — out of bounds panics here took the whole app down with a
+/// poisoned mutex.
+#[test]
+fn erasing_after_growing_past_the_alt_screen_stays_in_bounds() {
+    let mut grid = Grid::new(20, 5);
+    grid.apply(&TerminalCommand::CursorPosition { row: 5, col: 20 });
+    grid.apply(&TerminalCommand::EnterAltScreen);
+    grid.resize(60, 60);
+    grid.apply(&TerminalCommand::LeaveAltScreen);
+    grid.apply(&TerminalCommand::CursorPosition { row: 60, col: 60 });
+
+    grid.apply(&TerminalCommand::EraseInDisplay(1));
+    grid.apply(&TerminalCommand::EraseInLine(1));
+    grid.apply(&TerminalCommand::EraseInDisplay(0));
+    grid.apply(&TerminalCommand::EraseInLine(0));
+}
+
+#[test]
+fn erasing_after_shrinking_past_the_alt_screen_stays_in_bounds() {
+    let mut grid = Grid::new(60, 60);
+    grid.apply(&TerminalCommand::CursorPosition { row: 60, col: 60 });
+    grid.apply(&TerminalCommand::EnterAltScreen);
+    grid.resize(20, 5);
+    grid.apply(&TerminalCommand::LeaveAltScreen);
+
+    grid.apply(&TerminalCommand::EraseInDisplay(1));
+    grid.apply(&TerminalCommand::EraseInLine(1));
+    grid.apply(&TerminalCommand::EraseInDisplay(0));
+    grid.apply(&TerminalCommand::EraseInLine(0));
+}

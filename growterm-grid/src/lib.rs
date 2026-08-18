@@ -234,23 +234,11 @@ impl Grid {
             self.cells.resize(new_rows, vec![Cell::default(); new_cols]);
         }
 
-        // Adjust scrollback row widths
-        for row in &mut self.scrollback {
-            row.resize(new_cols, Cell::default());
-        }
-
-        // Invariant: cells length must equal new_rows
-        self.cells.resize(new_rows, vec![Cell::default(); new_cols]);
-        // Rows restored from scrollback during expansion keep their old width,
-        // so normalize every visible row to the new column count.
-        for row in &mut self.cells {
-            row.resize(new_cols, Cell::default());
-        }
         self.cols = new_cols;
         self.rows = new_rows;
-        self.cursor_row = self.cursor_row.min(self.rows - 1);
-        self.cursor_col = self.cursor_col.min(self.cols - 1);
-        self.scroll_offset = self.scroll_offset.min(self.scrollback.len());
+        // Rows restored from scrollback during expansion keep their old width,
+        // so this also normalizes every row to the new column count.
+        self.fit_to_size();
         // Reset scroll region on resize
         self.scroll_region_top = 0;
         self.scroll_region_bottom = self.rows;
@@ -441,8 +429,23 @@ impl Grid {
             self.scrollback = saved.scrollback;
             self.scroll_offset = saved.scroll_offset;
             self.cursor_visible = saved.cursor_visible;
+            // The window may have been resized while the alt screen was up, so
+            // what was saved is the wrong shape for the grid it returns to.
+            self.fit_to_size();
         }
         self.in_alt_screen = false;
+    }
+
+    /// Force cells, scrollback and the cursor back inside `rows` x `cols`.
+    fn fit_to_size(&mut self) {
+        self.cells
+            .resize(self.rows, vec![Cell::default(); self.cols]);
+        for row in self.cells.iter_mut().chain(self.scrollback.iter_mut()) {
+            row.resize(self.cols, Cell::default());
+        }
+        self.cursor_row = self.cursor_row.min(self.rows - 1);
+        self.cursor_col = self.cursor_col.min(self.cols - 1);
+        self.scroll_offset = self.scroll_offset.min(self.scrollback.len());
     }
 
     fn insert_lines(&mut self, n: u16) {
