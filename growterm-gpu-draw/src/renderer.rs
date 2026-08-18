@@ -487,7 +487,7 @@ impl GpuDrawer {
         content_y_offset: f32,
         title_bar_height: f32,
         header_opacity: f32,
-        unfocused_tint: f32,
+        unfocused_tint: [f32; 4],
     ) {
         if self.surface_dirty {
             self.surface_dirty = false;
@@ -1074,14 +1074,14 @@ impl GpuDrawer {
                 }
             }
 
-            // Pass 5: grey the whole window while another one holds focus. White
-            // over a dark terminal reads as a lifted background; black would
-            // just darken what is already dark.
-            if unfocused_tint > 0.0 {
+            // Pass 5: wash the whole window while another one holds focus. A
+            // colour reads as "not this one" at a glance; a plain dim only
+            // reads as "harder to see".
+            if unfocused_tint[3] > 0.0 {
                 let screen_w = self.surface_config.width as f32;
                 let screen_h = self.surface_config.height as f32;
                 let mut tint_verts: Vec<BgVertex> = Vec::new();
-                push_bg_rect(&mut tint_verts, 0.0, 0.0, screen_w, screen_h, [1.0, 1.0, 1.0, unfocused_tint]);
+                push_bg_rect(&mut tint_verts, 0.0, 0.0, screen_w, screen_h, unfocused_tint);
                 let tint_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("unfocused_tint_vb"),
                     contents: bytemuck::cast_slice(&tint_verts),

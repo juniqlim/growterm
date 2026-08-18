@@ -282,7 +282,12 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
     let mut window_focused = true;
     macro_rules! tint_now {
         () => {
-            if window_focused { 0.0 } else { config.unfocused_tint }
+            if window_focused {
+                [0.0, 0.0, 0.0, 0.0]
+            } else {
+                let [r, g, b] = config.unfocused_tint_rgb();
+                [r, g, b, config.unfocused_tint]
+            }
         };
     }
     macro_rules! do_render {
@@ -1498,7 +1503,7 @@ fn shell_escape(path: &str) -> String {
 }
 
 /// Returns true if the glyph budget was exceeded and another redraw is needed.
-fn render_with_tabs(drawer: &mut GpuDrawer, tabs: &TabManager, preedit: &str, sel: &Selection, hover_url_ranges: &[(u32, u16, u16)], is_break: bool, break_text: Option<&[String]>, show_scrollbar: bool, copy_flash: Option<(u16, u16, Instant)>, tab_dragging: Option<usize>, transparent_tab_bar: bool, title_bar_height: f32, header_opacity: f32, search_highlights: &[(u32, u16, u16)], search_current: Option<(u32, u16, u16)>, search_bar: Option<(&str, usize, usize)>, unfocused_tint: f32) -> bool {
+fn render_with_tabs(drawer: &mut GpuDrawer, tabs: &TabManager, preedit: &str, sel: &Selection, hover_url_ranges: &[(u32, u16, u16)], is_break: bool, break_text: Option<&[String]>, show_scrollbar: bool, copy_flash: Option<(u16, u16, Instant)>, tab_dragging: Option<usize>, transparent_tab_bar: bool, title_bar_height: f32, header_opacity: f32, search_highlights: &[(u32, u16, u16)], search_current: Option<(u32, u16, u16)>, search_bar: Option<(&str, usize, usize)>, unfocused_tint: [f32; 4]) -> bool {
     let tab = match tabs.active_tab() {
         Some(t) => t,
         None => return false,

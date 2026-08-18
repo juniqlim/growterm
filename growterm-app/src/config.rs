@@ -122,6 +122,8 @@ pub struct Config {
     pub header_opacity: f32,
     #[serde(default = "default_unfocused_tint")]
     pub unfocused_tint: f32,
+    #[serde(default = "default_unfocused_tint_color")]
+    pub unfocused_tint_color: String,
     #[serde(default)]
     pub coaching_command: Option<String>,
     #[serde(default)]
@@ -156,13 +158,36 @@ fn default_header_opacity() -> f32 {
     0.8
 }
 
-/// How strongly an unfocused window is greyed, 0.0 (off) to 1.0 (white out).
+/// How far an unfocused window is dimmed, 0.0 (off) to 1.0 (the tint colour).
 fn default_unfocused_tint() -> f32 {
-    0.25
+    0.35
+}
+
+/// What an unfocused window is washed with. Amber reads as "not this one" at a
+/// glance, where a plain dim only reads as "harder to see".
+fn default_unfocused_tint_color() -> String {
+    "#ff8800".to_string()
 }
 
 fn default_true() -> bool {
     true
+}
+
+fn parse_hex_rgb(text: &str) -> Option<[f32; 3]> {
+    let hex = text.trim().strip_prefix('#').unwrap_or(text.trim());
+    let width = match hex.len() {
+        3 => 1,
+        6 => 2,
+        _ => return None,
+    };
+    let mut rgb = [0.0f32; 3];
+    for (i, slot) in rgb.iter_mut().enumerate() {
+        let part = &hex[i * width..(i + 1) * width];
+        let value = u8::from_str_radix(part, 16).ok()?;
+        let max = if width == 1 { 15.0 } else { 255.0 };
+        *slot = value as f32 / max;
+    }
+    Some(rgb)
 }
 
 impl Default for Config {
@@ -178,6 +203,7 @@ impl Default for Config {
             transparent_tab_bar: false,
             header_opacity: default_header_opacity(),
             unfocused_tint: default_unfocused_tint(),
+            unfocused_tint_color: default_unfocused_tint_color(),
             coaching_command: None,
             copy_mode_keys: CopyModeKeys::default(),
             window_width: None,
@@ -298,6 +324,7 @@ impl Config {
             transparent_tab_bar: read_bool("transparent_tab_bar", false),
             header_opacity: default_header_opacity(),
             unfocused_tint: default_unfocused_tint(),
+            unfocused_tint_color: default_unfocused_tint_color(),
             coaching_command: None,
             copy_mode_keys: CopyModeKeys::default(),
             window_width: None,
@@ -305,6 +332,14 @@ impl Config {
             window_x: None,
             window_y: None,
         }
+    }
+
+    /// The tint colour as linear-ish 0..1 components, falling back to the
+    /// default when the config carries something unreadable.
+    pub fn unfocused_tint_rgb(&self) -> [f32; 3] {
+        parse_hex_rgb(&self.unfocused_tint_color)
+            .or_else(|| parse_hex_rgb(&default_unfocused_tint_color()))
+            .unwrap_or([0.0, 0.0, 0.0])
     }
 
     pub fn save(&self) {
@@ -554,9 +589,9 @@ mod unfocused_tint_tests {
     use super::*;
 
     #[test]
-    fn unfocused_tint_defaults_to_a_light_grey() {
+    fn unfocused_tint_defaults_to_a_visible_wash() {
         let config: Config = toml::from_str("").unwrap();
-        assert_eq!(config.unfocused_tint, 0.25);
+        assert_eq!(config.unfocused_tint, 0.35);
     }
 
     #[test]
@@ -569,6 +604,36 @@ mod unfocused_tint_tests {
     fn unfocused_tint_can_be_turned_off() {
         let config: Config = toml::from_str("unfocused_tint = 0.0\n").unwrap();
         assert_eq!(config.unfocused_tint, 0.0);
+    }
+
+    #[test]
+    fn unfocused_tint_colour_defaults_to_amber() {
+        let config: Config = toml::from_str("").unwrap();
+        assert_eq!(config.unfocused_tint_color, "#ff8800");
+    }
+
+    #[test]
+    fn unfocused_tint_colour_is_configurable() {
+        let config: Config = toml::from_str("unfocused_tint_color = \"#cc0000\"\n").unwrap();
+        assert_eq!(config.unfocused_tint_rgb(), [0.8, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn a_three_digit_colour_expands() {
+        let config: Config = toml::from_str("unfocused_tint_color = \"#f00\"\n").unwrap();
+        assert_eq!(config.unfocused_tint_rgb(), [1.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn a_colour_needs_no_hash() {
+        let config: Config = toml::from_str("unfocused_tint_color = \"000000\"\n").unwrap();
+        assert_eq!(config.unfocused_tint_rgb(), [0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn an_unreadable_colour_falls_back_to_the_default() {
+        let config: Config = toml::from_str("unfocused_tint_color = \"not a colour\"\n").unwrap();
+        assert_eq!(config.unfocused_tint_rgb(), [1.0, 0x88 as f32 / 255.0, 0.0]);
     }
 }
 
