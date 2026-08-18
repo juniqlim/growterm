@@ -4,6 +4,7 @@ use std::time::Duration;
 use growterm_integration_tests::{build_binary, cleanup, parse_dump_rows, wait_for_dump};
 
 #[test]
+#[ignore = "launches the app; run with `cargo test -- --ignored`"]
 fn dropped_file_path_is_inserted_into_prompt() {
     let bin = build_binary();
     let dump_path = std::env::temp_dir().join(format!(

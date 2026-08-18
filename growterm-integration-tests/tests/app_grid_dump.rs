@@ -5,6 +5,7 @@ use growterm_integration_tests::{
 };
 
 #[test]
+#[ignore = "launches the app; run with `cargo test -- --ignored`"]
 fn shell_prompt_with_home_directory_and_cursor_ready() {
     let bin = build_binary();
     let dump_path = std::env::temp_dir().join(format!(
@@ -47,6 +48,7 @@ fn shell_prompt_with_home_directory_and_cursor_ready() {
 }
 
 #[test]
+#[ignore = "launches the app; run with `cargo test -- --ignored`"]
 fn echo_command_output_appears_in_app() {
     let bin = build_binary();
     let dump_path = std::env::temp_dir().join(format!(
@@ -71,6 +73,7 @@ fn echo_command_output_appears_in_app() {
 }
 
 #[test]
+#[ignore = "launches the app; run with `cargo test -- --ignored`"]
 fn echo_korean_output_appears_in_app() {
     let bin = build_binary();
     let dump_path = std::env::temp_dir().join(format!(

@@ -6,6 +6,7 @@ use growterm_integration_tests::{
 };
 
 #[test]
+#[ignore = "launches the app; run with `cargo test -- --ignored`"]
 fn launches_claude_code_in_shell() {
     if std::env::var("GROWTERM_RUN_CLAUDE_CODE_TEST").ok().as_deref() != Some("1") {
         eprintln!("skip: set GROWTERM_RUN_CLAUDE_CODE_TEST=1 to run Claude Code launch test");

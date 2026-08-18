@@ -1,4 +1,6 @@
 [workspace]
+# growterm-integration-tests is a member so `cargo test` keeps it compiling.
+# Its app-launching tests are #[ignore]d, so they stay opt-in:
+# `cargo test -- --ignored`.
 members = ["growterm-*"]
-exclude = ["growterm-integration-tests"]
 resolver = "2"

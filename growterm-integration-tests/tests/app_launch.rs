@@ -3,6 +3,7 @@ use std::time::Duration;
 use growterm_integration_tests::{build_binary, spawn_app};
 
 #[test]
+#[ignore = "launches the app; run with `cargo test -- --ignored`"]
 fn app_starts_and_stays_alive() {
     let bin = build_binary();
 
@@ -33,6 +34,7 @@ fn app_starts_and_stays_alive() {
 }
 
 #[test]
+#[ignore = "launches the app; run with `cargo test -- --ignored`"]
 fn app_accepts_keystrokes_without_crash() {
     let bin = build_binary();
 

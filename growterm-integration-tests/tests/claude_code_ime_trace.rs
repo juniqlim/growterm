@@ -28,6 +28,7 @@ fn find_char_positions(rows: &[String], target: char) -> Vec<(usize, usize)> {
 }
 
 #[test]
+#[ignore = "launches the app; run with `cargo test -- --ignored`"]
 fn claude_code_hangul_composition_cursor_matches_visible_char_position() {
     if std::env::var("GROWTERM_RUN_CLAUDE_CODE_IME_TRACE_TEST")
         .ok()

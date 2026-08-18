@@ -9,6 +9,7 @@ use growterm_integration_tests::{
 /// 앱 실행 → osascript로 한글 자모(ㅎㅏㄴㄱㅡㄹ) 전송 → 엔터 →
 /// 그리드에 조합된 "한글"이 나타나는지 검증.
 #[test]
+#[ignore = "launches the app; run with `cargo test -- --ignored`"]
 fn osascript_jamo_keystroke_produces_composed_hangul() {
     if std::env::var("GROWTERM_RUN_IME_COMPOSE_TEST").ok().as_deref() != Some("1") {
         eprintln!("skip: set GROWTERM_RUN_IME_COMPOSE_TEST=1 to run IME composition test");
