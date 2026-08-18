@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use crate::lock::LockRecover;
+
 #[cfg(test)]
 const DEFAULT_WORK_SECS: u64 = 25 * 60;
 #[cfg(test)]
@@ -59,7 +61,7 @@ impl Pomodoro {
             self.phase = Phase::Idle;
             self.started_at = None;
             self.scrollback_snapshot.clear();
-            *self.ai_response.lock().unwrap() = None;
+            *self.ai_response.lock_recover() = None;
         }
     }
 
@@ -90,7 +92,7 @@ impl Pomodoro {
             self.phase = Phase::Working;
             self.started_at = Some(now);
             self.scrollback_snapshot.clear();
-            *self.ai_response.lock().unwrap() = None;
+            *self.ai_response.lock_recover() = None;
             for &(tab_idx, sb_len) in tab_scrollback_lens {
                 self.scrollback_snapshot.insert(tab_idx, sb_len);
             }
@@ -137,7 +139,7 @@ impl Pomodoro {
 
     /// Set the AI coaching response from the background thread handle.
     pub fn set_ai_response(&self, lines: Vec<String>) {
-        *self.ai_response.lock().unwrap() = Some(lines);
+        *self.ai_response.lock_recover() = Some(lines);
     }
 
     /// Get a clone of the Arc for the background thread to write into.
@@ -149,7 +151,7 @@ impl Pomodoro {
         if !self.coaching || self.phase != Phase::Break {
             return None;
         }
-        let guard = self.ai_response.lock().unwrap();
+        let guard = self.ai_response.lock_recover();
         if let Some(ref lines) = *guard {
             let mut result = vec!["[Coaching]".to_string(), String::new()];
             result.extend(lines.iter().cloned());
@@ -223,7 +225,7 @@ pub fn spawn_ai_coaching(
         {
             Ok(c) => c,
             Err(e) => {
-                *ai_response.lock().unwrap() = Some(vec![format!("AI 호출 실패: {e}")]);
+                *ai_response.lock_recover() = Some(vec![format!("AI 호출 실패: {e}")]);
                 return;
             }
         };
@@ -245,7 +247,7 @@ pub fn spawn_ai_coaching(
             }
         };
         save_coaching_file(&coaching_dir(), &lines);
-        *ai_response.lock().unwrap() = Some(lines);
+        *ai_response.lock_recover() = Some(lines);
     });
 }
 

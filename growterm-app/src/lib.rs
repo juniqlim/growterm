@@ -1,3 +1,4 @@
+pub mod lock;
 pub mod config;
 pub mod copy_mode;
 pub mod pomodoro;

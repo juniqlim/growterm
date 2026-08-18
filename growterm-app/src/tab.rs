@@ -4,6 +4,8 @@ use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use crate::lock::LockRecover;
+
 use growterm_grid::Grid;
 use crate::platform::MacWindow;
 use growterm_pty::PtyWriter;
@@ -373,12 +375,12 @@ fn start_io_thread(
                         let _ = file.write_all(&buf[..n]);
                         let _ = file.flush();
                     }
-                    *last_pty_output_at.lock().unwrap() = Some(Instant::now());
+                    *last_pty_output_at.lock_recover() = Some(Instant::now());
                     pending_queries.extend_from_slice(&buf[..n]);
                     let controls = extract_terminal_controls(&mut pending_queries);
 
                     let mut responses = Vec::new();
-                    let mut state = terminal.lock().unwrap();
+                    let mut state = terminal.lock_recover();
                     let commands = state.vt_parser.parse(&buf[..n]);
                     for cmd in &commands {
                         state.grid.apply(cmd);

@@ -1,3 +1,4 @@
+mod lock;
 mod app;
 mod config;
 mod copy_mode;

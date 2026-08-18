@@ -4,6 +4,7 @@ use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 use growterm_gpu_draw::GpuDrawer;
+use crate::lock::LockRecover;
 use crate::platform::{AppEvent, MacWindow, Modifiers};
 
 use crate::config::CopyModeAction;
@@ -81,7 +82,7 @@ fn apply_scrollbar_drag(tabs: &TabManager, y: f64, screen_h: f32, tab_bar_offset
     let content_h = screen_h - tab_bar_offset;
     let ratio = ((y as f32) - tab_bar_offset).clamp(0.0, content_h) / content_h;
     if let Some(tab) = tabs.active_tab() {
-        let mut state = tab.terminal.lock().unwrap();
+        let mut state = tab.terminal.lock_recover();
         let scrollback_len = state.grid.scrollback_len();
         let rows = state.grid.cells().len();
         let total = scrollback_len + rows;
@@ -94,7 +95,7 @@ fn apply_scrollbar_drag(tabs: &TabManager, y: f64, screen_h: f32, tab_bar_offset
 /// Resize all tabs to the given grid dimensions.
 fn resize_all_tabs(tabs: &mut TabManager, cols: u16, rows: u16) {
     for tab in tabs.tabs_mut() {
-        let mut state = tab.terminal.lock().unwrap();
+        let mut state = tab.terminal.lock_recover();
         state.grid.resize(cols, rows);
         drop(state);
         let _ = tab.pty_writer.resize(rows, cols);
@@ -125,7 +126,7 @@ fn exit_copy_mode(copy_mode: &mut CopyMode, sel: &mut Selection, window: &MacWin
     copy_mode.exit(sel);
     window.set_copy_mode(false);
     if let Some(tab) = tabs.active_tab() {
-        let mut state = tab.terminal.lock().unwrap();
+        let mut state = tab.terminal.lock_recover();
         state.grid.set_scroll_offset(0);
     }
 }
@@ -165,7 +166,7 @@ fn should_handle_copy_mode_action_for_event(
 
 fn enter_copy_mode(copy_mode: &mut CopyMode, sel: &mut Selection, window: &MacWindow, tabs: &TabManager) {
     if let Some(tab) = tabs.active_tab() {
-        let state = tab.terminal.lock().unwrap();
+        let state = tab.terminal.lock_recover();
         let sb_len = state.grid.scrollback_len() as u32;
         let (cursor_row, _cursor_col) = state.grid.cursor_pos();
         let abs_cursor_row = sb_len + cursor_row as u32;
@@ -180,7 +181,7 @@ fn enter_copy_mode(copy_mode: &mut CopyMode, sel: &mut Selection, window: &MacWi
 /// Convert screen row to absolute row (including scrollback).
 fn screen_to_abs_row(tabs: &TabManager, screen_row: u16) -> u32 {
     if let Some(tab) = tabs.active_tab() {
-        let state = tab.terminal.lock().unwrap();
+        let state = tab.terminal.lock_recover();
         let base = state.grid.scrollback_len().saturating_sub(state.grid.scroll_offset());
         screen_row as u32 + base as u32
     } else {
@@ -334,7 +335,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
             }
         }
         let has_scrollback = tabs.active_tab()
-            .map(|t| t.terminal.lock().unwrap().grid.scrollback_len() > 0)
+            .map(|t| t.terminal.lock_recover().grid.scrollback_len() > 0)
             .unwrap_or(false);
         match event {
             AppEvent::TextCommit(text) => {
@@ -347,7 +348,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                         }
                     }
                     if let Some(tab) = tabs.active_tab() {
-                        let state = tab.terminal.lock().unwrap();
+                        let state = tab.terminal.lock_recover();
                         search_mode.search(&state.grid);
                     }
                     do_render!();
@@ -421,7 +422,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                                 // Tab bar just appeared — shrink existing tabs by 1 row
                                 if had_no_tab_bar && tabs.show_tab_bar() {
                                     for t in tabs.tabs_mut() {
-                                        let mut st = t.terminal.lock().unwrap();
+                                        let mut st = t.terminal.lock_recover();
                                         st.grid.resize(cols, term_rows);
                                         drop(st);
                                         let _ = t.pty_writer.resize(term_rows, cols);
@@ -449,7 +450,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                             let cols = (w as f32 / cw).floor().max(1.0) as u16;
                             let rows = tabs.term_rows(h, ch, drawer.tab_bar_height(), title_bar_height);
                             if let Some(t) = tabs.active_tab_mut() {
-                                let mut st = t.terminal.lock().unwrap();
+                                let mut st = t.terminal.lock_recover();
                                 st.grid.resize(cols, rows);
                                 drop(st);
                                 let _ = t.pty_writer.resize(rows, cols);
@@ -504,7 +505,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     // Cmd+PageUp/Down: scroll one page
                     if keycode == kc::PAGE_UP || keycode == kc::PAGE_DOWN {
                         if let Some(tab) = tabs.active_tab() {
-                            let mut state = tab.terminal.lock().unwrap();
+                            let mut state = tab.terminal.lock_recover();
                             let row_count = state.grid.cells().len();
                             if keycode == kc::PAGE_UP {
                                 state.grid.scroll_up_view(row_count);
@@ -520,7 +521,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     // Cmd+Home: scroll to top, Cmd+End: scroll to bottom
                     if keycode == kc::HOME || keycode == kc::END {
                         if let Some(tab) = tabs.active_tab() {
-                            let mut state = tab.terminal.lock().unwrap();
+                            let mut state = tab.terminal.lock_recover();
                             if keycode == kc::HOME {
                                 let max = state.grid.scrollback_len();
                                 state.grid.scroll_up_view(max);
@@ -536,7 +537,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     // Cmd+A: copy input line to clipboard
                     if keycode == kc::ANSI_A {
                         if let Some(tab) = tabs.active_tab() {
-                            let state = tab.terminal.lock().unwrap();
+                            let state = tab.terminal.lock_recover();
                             let (text, flash_start, flash_end) =
                                 selection::input_line_text(&state.grid);
                             drop(state);
@@ -557,7 +558,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                         if copy_mode.active {
                             exit_copy_mode(&mut copy_mode, &mut sel, &window, &tabs);
                         } else if let Some(tab) = tabs.active_tab() {
-                            let state = tab.terminal.lock().unwrap();
+                            let state = tab.terminal.lock_recover();
                             let sb_len = state.grid.scrollback_len() as u32;
                             let (cursor_row, _cursor_col) = state.grid.cursor_pos();
                             let abs_cursor_row = sb_len + cursor_row as u32;
@@ -575,7 +576,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     if keycode == kc::ANSI_C {
                         if !sel.is_empty() {
                             if let Some(tab) = tabs.active_tab() {
-                                let state = tab.terminal.lock().unwrap();
+                                let state = tab.terminal.lock_recover();
                                 let text = selection::extract_text_absolute(&state.grid, &sel);
                                 drop(state);
                                 copy_to_clipboard(&text);
@@ -654,7 +655,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                             // 현재 매치로 스크롤
                             if let Some(m) = search_mode.current_match() {
                                 if let Some(tab) = tabs.active_tab() {
-                                    let mut state = tab.terminal.lock().unwrap();
+                                    let mut state = tab.terminal.lock_recover();
                                     let sb_len = state.grid.scrollback_len();
                                     let visible_rows = state.grid.cells().len();
                                     let offset = state.grid.scroll_offset();
@@ -673,7 +674,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                         kc::DELETE => {
                             search_mode.pop_char();
                             if let Some(tab) = tabs.active_tab() {
-                                let state = tab.terminal.lock().unwrap();
+                                let state = tab.terminal.lock_recover();
                                 search_mode.search(&state.grid);
                             }
                         }
@@ -686,7 +687,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                                     }
                                 }
                                 if let Some(tab) = tabs.active_tab() {
-                                    let state = tab.terminal.lock().unwrap();
+                                    let state = tab.terminal.lock_recover();
                                     search_mode.search(&state.grid);
                                 }
                             }
@@ -707,11 +708,11 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                 // 복사모드: PTY 전송 건너뛰고 raw keycode로 처리
                 if copy_mode.active {
                     let cols = tabs.active_tab().map_or(80u16, |t| {
-                        let state = t.terminal.lock().unwrap();
+                        let state = t.terminal.lock_recover();
                         state.grid.cells().first().map_or(80, |r| r.len()) as u16
                     });
                     let max_row = tabs.active_tab().map_or(0u32, |t| {
-                        let state = t.terminal.lock().unwrap();
+                        let state = t.terminal.lock_recover();
                         let sb_len = state.grid.scrollback_len() as u32;
                         let screen_rows = state.grid.cells().len() as u32;
                         sb_len + screen_rows - 1
@@ -744,7 +745,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                                 // y: 선택 텍스트 클립보드에 복사 후 모드 종료
                                 if !sel.is_empty() {
                                     if let Some(tab) = tabs.active_tab() {
-                                        let state = tab.terminal.lock().unwrap();
+                                        let state = tab.terminal.lock_recover();
                                         let text = selection::extract_text_absolute(&state.grid, &sel);
                                         drop(state);
                                         copy_to_clipboard(&text);
@@ -754,7 +755,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                             }
                             CopyModeAction::OpenUrl => {
                                 if let Some(tab) = tabs.active_tab() {
-                                    let state = tab.terminal.lock().unwrap();
+                                    let state = tab.terminal.lock_recover();
                                     let min_row = sel.start.0.min(sel.end.0);
                                     let max_row = sel.start.0.max(sel.end.0);
                                     let mut urls = Vec::new();
@@ -778,7 +779,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     // 커서 행이 화면에 보이도록 스크롤 조정 (복사모드 활성 중에만)
                     if copy_mode.active {
                     if let Some(tab) = tabs.active_tab() {
-                        let mut state = tab.terminal.lock().unwrap();
+                        let mut state = tab.terminal.lock_recover();
                         let sb_len = state.grid.scrollback_len();
                         let visible_rows = state.grid.cells().len();
                         let offset = state.grid.scroll_offset();
@@ -862,7 +863,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                 let screen_h = window.inner_size().1 as f32;
                 if (x as f32) >= screen_w - SCROLLBAR_HIT_WIDTH {
                     let has_scrollback_content = tabs.active_tab().map_or(false, |tab| {
-                        tab.terminal.lock().unwrap().grid.scrollback_len() > 0
+                        tab.terminal.lock_recover().grid.scrollback_len() > 0
                     });
                     if has_scrollback_content {
                         scrollbar_dragging = true;
@@ -881,7 +882,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                 // Cmd+Click: open URL under cursor
                 if modifiers.contains(Modifiers::SUPER) {
                     if let Some(tab) = tabs.active_tab() {
-                        let state = tab.terminal.lock().unwrap();
+                        let state = tab.terminal.lock_recover();
                         if let Some(found_url) = selection::find_url_at_logical(&state.grid, abs_row, col as usize) {
                             drop(state);
                             open_url(&found_url);
@@ -992,7 +993,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     );
                     if let Some(tab) = tabs.active_tab() {
                         let abs_row = screen_to_abs_row(&tabs, screen_row);
-                        let state = tab.terminal.lock().unwrap();
+                        let state = tab.terminal.lock_recover();
                         let ranges = selection::find_url_hover_ranges(&state.grid, abs_row, col as usize);
                         drop(state);
                         ranges
@@ -1039,7 +1040,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                 if lines != 0 {
                     scroll_accum -= lines as f64 * line_height;
                     if let Some(tab) = tabs.active_tab() {
-                        let mut state = tab.terminal.lock().unwrap();
+                        let mut state = tab.terminal.lock_recover();
                         if lines > 0 {
                             state.grid.scroll_up_view(lines as usize);
                         } else {
@@ -1094,7 +1095,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                 }
                 // Feed PTY output timestamp to each tab's response timer
                 for tab in tabs.tabs_mut() {
-                    let ts = tab.last_pty_output_at.lock().unwrap().take();
+                    let ts = tab.last_pty_output_at.lock_recover().take();
                     if let Some(ts) = ts {
                         tab.response_timer.on_pty_output(ts);
                     }
@@ -1118,7 +1119,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                 }
                 let (cw, ch) = drawer.cell_size();
                 let next_ime_cursor_rect = tabs.active_tab().and_then(|tab| {
-                    let state = tab.terminal.lock().unwrap();
+                    let state = tab.terminal.lock_recover();
                     let scrolled = state.grid.scroll_offset() > 0;
                     let cursor = if scrolled || !state.grid.cursor_visible() {
                         None
@@ -1154,7 +1155,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                             continue;
                         }
                         if let Some(tab) = tabs.active_tab_mut() {
-                            let state = tab.terminal.lock().unwrap();
+                            let state = tab.terminal.lock_recover();
                             let has_content =
                                 state
                                     .grid
@@ -1374,7 +1375,7 @@ fn tab_scrollback_lens(tabs: &TabManager) -> Vec<(u64, usize)> {
     tabs.tabs()
         .iter()
         .map(|tab| {
-            let state = tab.terminal.lock().unwrap();
+            let state = tab.terminal.lock_recover();
             let (cursor_row, _) = state.grid.cursor_pos();
             let abs = state.grid.scrollback_len() + cursor_row as usize + 1;
             (tab.id, abs)
@@ -1410,7 +1411,7 @@ fn extract_pomodoro_tab_text(tabs: &TabManager, pomodoro: &Pomodoro) -> String {
             Some(&v) => v,
             None => continue,
         };
-        let state = tab.terminal.lock().unwrap();
+        let state = tab.terminal.lock_recover();
         let text = extract_grid_text(&state.grid, start_abs);
         if text.trim().is_empty() {
             continue;
@@ -1488,7 +1489,7 @@ fn render_with_tabs(drawer: &mut GpuDrawer, tabs: &TabManager, preedit: &str, se
         None => return false,
     };
 
-    let state = tab.terminal.lock().unwrap();
+    let state = tab.terminal.lock_recover();
     let scrolled = state.grid.scroll_offset() > 0;
     let cursor_pos = state.grid.cursor_pos();
     let cursor = if scrolled || !state.grid.cursor_visible() {
