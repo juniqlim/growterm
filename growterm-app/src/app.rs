@@ -279,6 +279,12 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
     let mut last_title: Option<String> = None;
     let mut last_ime_cursor_rect: Option<(f32, f32, f32, f32)> = None;
 
+    let mut window_focused = true;
+    macro_rules! tint_now {
+        () => {
+            if window_focused { 0.0 } else { config.unfocused_tint }
+        };
+    }
     macro_rules! do_render {
         () => {{
             window.set_has_selection(!sel.is_empty());
@@ -289,7 +295,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
             } else {
                 None
             };
-            if render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &hover_url_ranges, pomodoro.is_input_blocked(), pomodoro.coaching_lines().as_deref(), scrollbar_dragging || scrollbar_visible_until.map_or(false, |t| t > Instant::now()), copy_flash, tab_dragging, transparent_tab_bar, title_bar_height, header_opacity, &search_hl, search_cur, search_bar_info) {
+            if render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &hover_url_ranges, pomodoro.is_input_blocked(), pomodoro.coaching_lines().as_deref(), scrollbar_dragging || scrollbar_visible_until.map_or(false, |t| t > Instant::now()), copy_flash, tab_dragging, transparent_tab_bar, title_bar_height, header_opacity, &search_hl, search_cur, search_bar_info, tint_now!()) {
                 window.request_redraw();
             }
         }};
@@ -302,7 +308,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
             } else {
                 None
             };
-            if render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &hover_url_ranges, pomodoro.is_input_blocked(), pomodoro.coaching_lines().as_deref(), true, copy_flash, tab_dragging, transparent_tab_bar, title_bar_height, header_opacity, &search_hl, search_cur, search_bar_info) {
+            if render_with_tabs(&mut drawer, &tabs, &preedit, &sel, &hover_url_ranges, pomodoro.is_input_blocked(), pomodoro.coaching_lines().as_deref(), true, copy_flash, tab_dragging, transparent_tab_bar, title_bar_height, header_opacity, &search_hl, search_cur, search_bar_info, tint_now!()) {
                 window.request_redraw();
             }
         }};
@@ -1277,6 +1283,10 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     0.0
                 };
             }
+            AppEvent::FocusChanged(focused) => {
+                window_focused = focused;
+                do_render!();
+            }
             AppEvent::ReloadConfig => {
                 let new_config = crate::config::Config::load();
                 // Apply font changes
@@ -1483,7 +1493,7 @@ fn shell_escape(path: &str) -> String {
 }
 
 /// Returns true if the glyph budget was exceeded and another redraw is needed.
-fn render_with_tabs(drawer: &mut GpuDrawer, tabs: &TabManager, preedit: &str, sel: &Selection, hover_url_ranges: &[(u32, u16, u16)], is_break: bool, break_text: Option<&[String]>, show_scrollbar: bool, copy_flash: Option<(u16, u16, Instant)>, tab_dragging: Option<usize>, transparent_tab_bar: bool, title_bar_height: f32, header_opacity: f32, search_highlights: &[(u32, u16, u16)], search_current: Option<(u32, u16, u16)>, search_bar: Option<(&str, usize, usize)>) -> bool {
+fn render_with_tabs(drawer: &mut GpuDrawer, tabs: &TabManager, preedit: &str, sel: &Selection, hover_url_ranges: &[(u32, u16, u16)], is_break: bool, break_text: Option<&[String]>, show_scrollbar: bool, copy_flash: Option<(u16, u16, Instant)>, tab_dragging: Option<usize>, transparent_tab_bar: bool, title_bar_height: f32, header_opacity: f32, search_highlights: &[(u32, u16, u16)], search_current: Option<(u32, u16, u16)>, search_bar: Option<(&str, usize, usize)>, unfocused_tint: f32) -> bool {
     let tab = match tabs.active_tab() {
         Some(t) => t,
         None => return false,
@@ -1625,7 +1635,7 @@ fn render_with_tabs(drawer: &mut GpuDrawer, tabs: &TabManager, preedit: &str, se
 
     let has_scrollback = scrollback_len > 0;
     let y_offset = crate::tab::content_y_offset(show_tab_bar, drawer.tab_bar_height(), title_bar_height, has_scrollback);
-    drawer.draw(&commands, scrollbar, tab_bar.as_ref(), is_break, break_text, transparent_tab_bar, y_offset, title_bar_height, header_opacity);
+    drawer.draw(&commands, scrollbar, tab_bar.as_ref(), is_break, break_text, transparent_tab_bar, y_offset, title_bar_height, header_opacity, unfocused_tint);
     false
 }
 

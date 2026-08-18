@@ -209,6 +209,9 @@ where
             WindowEvent::ModifiersChanged(modifiers) => {
                 self.modifiers = modifiers.state();
             }
+            WindowEvent::Focused(focused) => {
+                self.send(AppEvent::FocusChanged(focused));
+            }
             WindowEvent::Ime(ime) => match ime {
                 Ime::Enabled | Ime::Disabled => {
                     self.ime_composing = false;

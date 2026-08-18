@@ -120,6 +120,8 @@ pub struct Config {
     pub transparent_tab_bar: bool,
     #[serde(default = "default_header_opacity")]
     pub header_opacity: f32,
+    #[serde(default = "default_unfocused_tint")]
+    pub unfocused_tint: f32,
     #[serde(default)]
     pub coaching_command: Option<String>,
     #[serde(default)]
@@ -154,6 +156,11 @@ fn default_header_opacity() -> f32 {
     0.8
 }
 
+/// How strongly an unfocused window is greyed, 0.0 (off) to 1.0 (white out).
+fn default_unfocused_tint() -> f32 {
+    0.1
+}
+
 fn default_true() -> bool {
     true
 }
@@ -170,6 +177,7 @@ impl Default for Config {
             coaching: true,
             transparent_tab_bar: false,
             header_opacity: default_header_opacity(),
+            unfocused_tint: default_unfocused_tint(),
             coaching_command: None,
             copy_mode_keys: CopyModeKeys::default(),
             window_width: None,
@@ -256,6 +264,7 @@ impl Config {
             coaching: read_bool("coaching_enabled", true),
             transparent_tab_bar: read_bool("transparent_tab_bar", false),
             header_opacity: default_header_opacity(),
+            unfocused_tint: default_unfocused_tint(),
             coaching_command: None,
             copy_mode_keys: CopyModeKeys::default(),
             window_width: None,
@@ -504,5 +513,28 @@ window_y = 50
         assert_eq!(final_config.window_x, Some(100.0));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod unfocused_tint_tests {
+    use super::*;
+
+    #[test]
+    fn unfocused_tint_defaults_to_a_light_grey() {
+        let config: Config = toml::from_str("").unwrap();
+        assert_eq!(config.unfocused_tint, 0.1);
+    }
+
+    #[test]
+    fn unfocused_tint_is_configurable() {
+        let config: Config = toml::from_str("unfocused_tint = 0.4\n").unwrap();
+        assert_eq!(config.unfocused_tint, 0.4);
+    }
+
+    #[test]
+    fn unfocused_tint_can_be_turned_off() {
+        let config: Config = toml::from_str("unfocused_tint = 0.0\n").unwrap();
+        assert_eq!(config.unfocused_tint, 0.0);
     }
 }

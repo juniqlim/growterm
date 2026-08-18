@@ -109,6 +109,7 @@ coaching = true                               # AI 코칭 활성화
 coaching_command = "claude -p ..."            # 커스텀 코칭 명령어
 transparent_tab_bar = false                   # 탭/타이틀바 투명화
 header_opacity = 0.8                          # 탭바 불투명도 (0.0–1.0)
+unfocused_tint = 0.1                          # 포커스 잃은 창을 회색으로 (0.0 = 끄기)
 window_width = 800                            # 초기 윈도우 너비
 window_height = 600                           # 초기 윈도우 높이
 window_x = 100                                # 윈도우 x 위치

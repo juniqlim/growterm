@@ -109,6 +109,7 @@ coaching = true                               # enable AI coaching
 coaching_command = "claude -p ..."            # custom coaching command
 transparent_tab_bar = false                   # transparent tab/title bar
 header_opacity = 0.8                          # tab bar opacity (0.0–1.0)
+unfocused_tint = 0.1                          # grey an unfocused window (0.0 = off)
 window_width = 800                            # initial window width
 window_height = 600                           # initial window height
 window_x = 100                                # window x position

@@ -23,6 +23,8 @@ pub enum AppEvent {
     ToggleResponseTimer,
     ToggleCoaching,
     ToggleTransparentTabBar,
+    /// Window gained or lost focus
+    FocusChanged(bool),
     ReloadConfig,
 }
 

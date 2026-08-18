@@ -41,6 +41,8 @@ pub enum AppEvent {
     /// 반투명 탭바 토글
     ToggleTransparentTabBar,
     /// 설정 파일 리로드
+    /// 윈도우 포커스 획득/상실
+    FocusChanged(bool),
     ReloadConfig,
 }
 
