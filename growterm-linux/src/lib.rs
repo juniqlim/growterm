@@ -8,3 +8,6 @@ pub use window::{run, MacWindow};
 
 /// Tabs are switched with Alt+1~9 here, so labels hint Alt.
 pub const TAB_SHORTCUT_PREFIX: &str = "Alt";
+
+/// The desktop's URL handler.
+pub const URL_OPENER: &str = "xdg-open";

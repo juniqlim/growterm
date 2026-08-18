@@ -762,9 +762,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                                     }
                                     drop(state);
                                     for u in &urls {
-                                        let _ = std::process::Command::new("open")
-                                            .arg(u)
-                                            .spawn();
+                                        open_url(u);
                                     }
                                 }
                             }
@@ -884,9 +882,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                         let state = tab.terminal.lock().unwrap();
                         if let Some(found_url) = selection::find_url_at_logical(&state.grid, abs_row, col as usize) {
                             drop(state);
-                            let _ = std::process::Command::new("open")
-                                .arg(found_url)
-                                .spawn();
+                            open_url(&found_url);
                         } else {
                             drop(state);
                         }
@@ -1343,6 +1339,14 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
     }
 }
 
+
+/// Hand a URL to the desktop's handler. The command differs per platform,
+/// so the platform layer names it.
+fn open_url(url: &str) {
+    let _ = std::process::Command::new(crate::platform::URL_OPENER)
+        .arg(url)
+        .spawn();
+}
 
 fn spawn_new_window() {
     let Ok(exe) = std::env::current_exe() else { return };
