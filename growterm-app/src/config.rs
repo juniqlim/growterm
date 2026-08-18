@@ -158,7 +158,7 @@ fn default_header_opacity() -> f32 {
 
 /// How strongly an unfocused window is greyed, 0.0 (off) to 1.0 (white out).
 fn default_unfocused_tint() -> f32 {
-    0.1
+    0.25
 }
 
 fn default_true() -> bool {
@@ -523,7 +523,7 @@ mod unfocused_tint_tests {
     #[test]
     fn unfocused_tint_defaults_to_a_light_grey() {
         let config: Config = toml::from_str("").unwrap();
-        assert_eq!(config.unfocused_tint, 0.1);
+        assert_eq!(config.unfocused_tint, 0.25);
     }
 
     #[test]
