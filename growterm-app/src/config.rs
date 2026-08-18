@@ -235,8 +235,41 @@ impl Config {
 
     fn load_from_file(path: &std::path::Path) -> Self {
         match std::fs::read_to_string(path) {
-            Ok(contents) => toml::from_str(&contents).unwrap_or_default(),
+            Ok(contents) => Self::parse_str(&contents),
             Err(_) => Self::default(),
+        }
+    }
+
+    fn parse_str(contents: &str) -> Self {
+        let mut config: Config = toml::from_str(contents).unwrap_or_default();
+        config.adopt_legacy_minutes(contents);
+        config
+    }
+
+    /// The pomodoro durations were once written in minutes. Serde skips keys it
+    /// no longer knows, so a config still in that form would quietly fall back
+    /// to the defaults — read them here and carry them across. Saving writes
+    /// only the seconds form, so the old keys drop out on their own.
+    fn adopt_legacy_minutes(&mut self, contents: &str) {
+        let Ok(value) = contents.parse::<toml::Value>() else {
+            return;
+        };
+        let minutes = |key: &str| {
+            value
+                .get(key)
+                .and_then(toml::Value::as_integer)
+                .filter(|m| *m >= 0)
+                .map(|m| m as u64 * 60)
+        };
+        if value.get("pomodoro_work_seconds").is_none() {
+            if let Some(secs) = minutes("pomodoro_work_minutes") {
+                self.pomodoro_work_seconds = secs;
+            }
+        }
+        if value.get("pomodoro_break_seconds").is_none() {
+            if let Some(secs) = minutes("pomodoro_break_minutes") {
+                self.pomodoro_break_seconds = secs;
+            }
         }
     }
 
@@ -536,5 +569,57 @@ mod unfocused_tint_tests {
     fn unfocused_tint_can_be_turned_off() {
         let config: Config = toml::from_str("unfocused_tint = 0.0\n").unwrap();
         assert_eq!(config.unfocused_tint, 0.0);
+    }
+}
+
+#[cfg(test)]
+mod minutes_migration_tests {
+    use super::*;
+
+    #[test]
+    fn minutes_from_an_older_config_become_seconds() {
+        let config = Config::parse_str("pomodoro_work_minutes = 40\npomodoro_break_minutes = 7\n");
+
+        assert_eq!(config.pomodoro_work_seconds, 40 * 60);
+        assert_eq!(config.pomodoro_break_seconds, 7 * 60);
+    }
+
+    #[test]
+    fn seconds_win_when_a_config_carries_both() {
+        let config = Config::parse_str(
+            "pomodoro_work_minutes = 40\npomodoro_work_seconds = 90\n",
+        );
+
+        assert_eq!(config.pomodoro_work_seconds, 90);
+    }
+
+    #[test]
+    fn each_duration_migrates_on_its_own() {
+        let config = Config::parse_str(
+            "pomodoro_work_seconds = 90\npomodoro_break_minutes = 7\n",
+        );
+
+        assert_eq!(config.pomodoro_work_seconds, 90);
+        assert_eq!(config.pomodoro_break_seconds, 7 * 60);
+    }
+
+    #[test]
+    fn a_config_without_either_keeps_the_defaults() {
+        let config = Config::parse_str("font_size = 20.0\n");
+
+        assert_eq!(config.pomodoro_work_seconds, 25 * 60);
+        assert_eq!(config.pomodoro_break_seconds, 3 * 60);
+    }
+
+    /// Saving writes only the seconds form, so the old keys disappear the first
+    /// time anything is toggled.
+    #[test]
+    fn saving_a_migrated_config_drops_the_minutes_keys() {
+        let config = Config::parse_str("pomodoro_work_minutes = 40\n");
+
+        let written = toml::to_string(&config).unwrap();
+
+        assert!(written.contains("pomodoro_work_seconds = 2400"));
+        assert!(!written.contains("minutes"));
     }
 }
