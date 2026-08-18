@@ -15,6 +15,7 @@ use crate::key_convert::physical_keycode_to_app_keycode;
 pub struct MacWindow {
     window: Window,
     copy_mode: AtomicBool,
+    has_selection: AtomicBool,
 }
 
 impl MacWindow {
@@ -22,6 +23,7 @@ impl MacWindow {
         Self {
             window,
             copy_mode: AtomicBool::new(false),
+            has_selection: AtomicBool::new(false),
         }
     }
 
@@ -40,6 +42,16 @@ impl MacWindow {
 
     pub fn set_title(&self, title: &str) {
         self.window.set_title(title);
+    }
+
+    /// Ctrl+C copies here, so it has to know whether copying is what the user
+    /// meant — with nothing selected the key stays SIGINT.
+    pub fn set_has_selection(&self, has_selection: bool) {
+        self.has_selection.store(has_selection, Ordering::Relaxed);
+    }
+
+    fn has_selection(&self) -> bool {
+        self.has_selection.load(Ordering::Relaxed)
     }
 
     pub fn set_copy_mode(&self, enabled: bool) {
@@ -212,9 +224,6 @@ where
                 }
             },
             WindowEvent::KeyboardInput { event, .. } => {
-                if self.ime_composing {
-                    return;
-                }
                 let event_type = match event.state {
                     ElementState::Pressed if event.repeat => growterm_types::KeyEventType::Repeat,
                     ElementState::Pressed => growterm_types::KeyEventType::Press,
@@ -227,45 +236,28 @@ where
                 let characters = event.text.as_ref().map(|text| text.to_string());
                 let mut modifiers = self.current_modifiers();
 
-                // GNOME/X11 grabs and reorders the Super key, so Linux app
-                // shortcuts use Ctrl(+Shift)/Alt. Remap them to the SUPER-based
-                // shortcut handlers shared with macOS.
-                {
-                    use crate::key_convert::keycode as kc;
-                    let is_digit = |k: u16| {
-                        matches!(
-                            k,
-                            kc::ANSI_1
-                                | kc::ANSI_2
-                                | kc::ANSI_3
-                                | kc::ANSI_4
-                                | kc::ANSI_5
-                                | kc::ANSI_6
-                                | kc::ANSI_7
-                                | kc::ANSI_8
-                                | kc::ANSI_9
-                        )
-                    };
-                    if modifiers.contains(Modifiers::CONTROL) {
-                        let shift = modifiers.contains(Modifiers::SHIFT);
-                        let is_shortcut = match keycode {
-                            // Ctrl+= / Ctrl+- : zoom
-                            Some(k) if !shift => k == kc::ANSI_EQUAL || k == kc::ANSI_MINUS,
-                            // Ctrl+Shift+N/T new window/tab, Ctrl+Shift+W close tab
-                            Some(k) => k == kc::ANSI_N || k == kc::ANSI_T || k == kc::ANSI_W,
-                            None => false,
-                        };
-                        if is_shortcut {
-                            modifiers.remove(Modifiers::CONTROL | Modifiers::SHIFT);
-                            modifiers.insert(Modifiers::SUPER);
+                let has_selection = self
+                    .window
+                    .as_ref()
+                    .map(|window| window.has_selection())
+                    .unwrap_or(false);
+                let claimed = shortcut(keycode, modifiers, has_selection);
+
+                // A composing IME owns the keyboard — except for these, which it
+                // would otherwise swallow for as long as a syllable is unfinished.
+                if self.ime_composing && claimed.is_none() {
+                    return;
+                }
+
+                match claimed {
+                    Some(Shortcut::Fire(event)) => {
+                        if event_type == growterm_types::KeyEventType::Press {
+                            self.send(event);
                         }
-                    } else if modifiers.contains(Modifiers::ALT)
-                        && keycode.map(is_digit).unwrap_or(false)
-                    {
-                        // Alt+1~9 : switch tab by number
-                        modifiers.remove(Modifiers::ALT);
-                        modifiers.insert(Modifiers::SUPER);
+                        return;
                     }
+                    Some(Shortcut::AsSuper(remapped)) => modifiers = remapped,
+                    None => {}
                 }
 
                 let should_commit_text = event_type == growterm_types::KeyEventType::Press
@@ -364,6 +356,97 @@ pub fn run(
     event_loop.run_app(&mut app).expect("run linux event loop");
 }
 
+/// What this crate does with a modified key press.
+#[derive(Debug)]
+enum Shortcut {
+    /// Stand in these modifiers, so the handlers growterm-app shares with macOS run.
+    AsSuper(Modifiers),
+    /// Raise directly — macOS raises these from its View menu, which X11 has no
+    /// counterpart for.
+    Fire(AppEvent),
+}
+
+/// GNOME and X11 claim the Super key, so Linux app shortcuts are built on
+/// Ctrl+Shift (macOS Cmd) and Alt (tab movement) instead.
+fn shortcut(
+    keycode: Option<u16>,
+    modifiers: Modifiers,
+    has_selection: bool,
+) -> Option<Shortcut> {
+    use crate::key_convert::keycode as kc;
+
+    let key = keycode?;
+    let ctrl = modifiers.contains(Modifiers::CONTROL);
+    let shift = modifiers.contains(Modifiers::SHIFT);
+    let alt = modifiers.contains(Modifiers::ALT);
+
+    if ctrl && shift {
+        let event = match key {
+            kc::ANSI_P => AppEvent::TogglePomodoro,
+            kc::ANSI_R => AppEvent::ToggleResponseTimer,
+            kc::ANSI_K => AppEvent::ToggleCoaching,
+            kc::ANSI_O => AppEvent::ToggleTransparentTabBar,
+            kc::ANSI_L => AppEvent::ReloadConfig,
+            // New window/tab, close tab, copy, paste, copy input line, search,
+            // and scrollback — all keyed on Cmd over on macOS.
+            kc::ANSI_N
+            | kc::ANSI_T
+            | kc::ANSI_W
+            | kc::ANSI_C
+            | kc::ANSI_V
+            | kc::ANSI_A
+            | kc::ANSI_F
+            | kc::PAGE_UP
+            | kc::PAGE_DOWN
+            | kc::HOME
+            | kc::END => return Some(Shortcut::AsSuper(Modifiers::SUPER)),
+            _ => return None,
+        };
+        return Some(Shortcut::Fire(event));
+    }
+
+    if ctrl {
+        // Ctrl+= / Ctrl+- : zoom
+        if matches!(key, kc::ANSI_EQUAL | kc::ANSI_MINUS) {
+            return Some(Shortcut::AsSuper(Modifiers::SUPER));
+        }
+        // Ctrl+V paste, Ctrl+A copy the input line. Both shadow a readline key,
+        // which is the tradeoff asked for.
+        if matches!(key, kc::ANSI_V | kc::ANSI_A) {
+            return Some(Shortcut::AsSuper(Modifiers::SUPER));
+        }
+        // Ctrl+C copies a selection, and stays SIGINT when there is none.
+        if key == kc::ANSI_C && has_selection {
+            return Some(Shortcut::AsSuper(Modifiers::SUPER));
+        }
+    }
+
+    if alt {
+        // Alt+1~9 : switch tab by number
+        let is_digit = matches!(
+            key,
+            kc::ANSI_1
+                | kc::ANSI_2
+                | kc::ANSI_3
+                | kc::ANSI_4
+                | kc::ANSI_5
+                | kc::ANSI_6
+                | kc::ANSI_7
+                | kc::ANSI_8
+                | kc::ANSI_9
+        );
+        if is_digit {
+            return Some(Shortcut::AsSuper(Modifiers::SUPER));
+        }
+        // Alt+[ / Alt+] : previous / next tab, which growterm-app reads on SHIFT
+        if matches!(key, kc::ANSI_LEFT_BRACKET | kc::ANSI_RIGHT_BRACKET) {
+            return Some(Shortcut::AsSuper(Modifiers::SUPER | Modifiers::SHIFT));
+        }
+    }
+
+    None
+}
+
 fn convert_modifiers(modifiers: ModifiersState) -> Modifiers {
     let mut out = Modifiers::empty();
     if modifiers.shift_key() {
@@ -379,4 +462,154 @@ fn convert_modifiers(modifiers: ModifiersState) -> Modifiers {
         out |= Modifiers::SUPER;
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::key_convert::keycode as kc;
+
+    const CTRL_SHIFT: Modifiers = Modifiers::CONTROL.union(Modifiers::SHIFT);
+
+    fn fired(keycode: u16, modifiers: Modifiers) -> AppEvent {
+        match shortcut(Some(keycode), modifiers, false) {
+            Some(Shortcut::Fire(event)) => event,
+            other => panic!("expected a fired event, got {other:?}"),
+        }
+    }
+
+    fn remapped(keycode: u16, modifiers: Modifiers) -> Modifiers {
+        match shortcut(Some(keycode), modifiers, false) {
+            Some(Shortcut::AsSuper(m)) => m,
+            other => panic!("expected a remap, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ctrl_shift_c_and_v_reach_copy_and_paste() {
+        assert_eq!(remapped(kc::ANSI_C, CTRL_SHIFT), Modifiers::SUPER);
+        assert_eq!(remapped(kc::ANSI_V, CTRL_SHIFT), Modifiers::SUPER);
+    }
+
+    #[test]
+    fn ctrl_shift_a_copies_the_input_line() {
+        assert_eq!(remapped(kc::ANSI_A, CTRL_SHIFT), Modifiers::SUPER);
+    }
+
+    #[test]
+    fn ctrl_shift_f_opens_search() {
+        assert_eq!(remapped(kc::ANSI_F, CTRL_SHIFT), Modifiers::SUPER);
+    }
+
+    #[test]
+    fn ctrl_shift_scroll_keys_reach_the_scrollback() {
+        for key in [kc::PAGE_UP, kc::PAGE_DOWN, kc::HOME, kc::END] {
+            assert_eq!(remapped(key, CTRL_SHIFT), Modifiers::SUPER);
+        }
+    }
+
+    #[test]
+    fn ctrl_shift_n_t_w_open_and_close() {
+        for key in [kc::ANSI_N, kc::ANSI_T, kc::ANSI_W] {
+            assert_eq!(remapped(key, CTRL_SHIFT), Modifiers::SUPER);
+        }
+    }
+
+    #[test]
+    fn ctrl_zoom_keys_remap_to_super() {
+        for key in [kc::ANSI_EQUAL, kc::ANSI_MINUS] {
+            assert_eq!(remapped(key, Modifiers::CONTROL), Modifiers::SUPER);
+        }
+    }
+
+    #[test]
+    fn alt_digits_switch_tabs() {
+        for key in [kc::ANSI_1, kc::ANSI_5, kc::ANSI_9] {
+            assert_eq!(remapped(key, Modifiers::ALT), Modifiers::SUPER);
+        }
+    }
+
+    /// growterm-app cycles tabs on SUPER+SHIFT, so the shift has to survive.
+    #[test]
+    fn alt_brackets_cycle_tabs_with_shift_intact() {
+        for key in [kc::ANSI_LEFT_BRACKET, kc::ANSI_RIGHT_BRACKET] {
+            assert_eq!(
+                remapped(key, Modifiers::ALT),
+                Modifiers::SUPER | Modifiers::SHIFT
+            );
+        }
+    }
+
+    #[test]
+    fn ctrl_shift_p_toggles_pomodoro() {
+        assert!(matches!(
+            fired(kc::ANSI_P, CTRL_SHIFT),
+            AppEvent::TogglePomodoro
+        ));
+    }
+
+    #[test]
+    fn ctrl_shift_r_toggles_response_timer() {
+        assert!(matches!(
+            fired(kc::ANSI_R, CTRL_SHIFT),
+            AppEvent::ToggleResponseTimer
+        ));
+    }
+
+    #[test]
+    fn ctrl_shift_k_toggles_coaching() {
+        assert!(matches!(
+            fired(kc::ANSI_K, CTRL_SHIFT),
+            AppEvent::ToggleCoaching
+        ));
+    }
+
+    #[test]
+    fn ctrl_shift_o_toggles_transparent_tab_bar() {
+        assert!(matches!(
+            fired(kc::ANSI_O, CTRL_SHIFT),
+            AppEvent::ToggleTransparentTabBar
+        ));
+    }
+
+    #[test]
+    fn ctrl_shift_l_reloads_config() {
+        assert!(matches!(
+            fired(kc::ANSI_L, CTRL_SHIFT),
+            AppEvent::ReloadConfig
+        ));
+    }
+
+    #[test]
+    fn ctrl_v_pastes_and_ctrl_a_copies_the_input_line() {
+        assert_eq!(remapped(kc::ANSI_V, Modifiers::CONTROL), Modifiers::SUPER);
+        assert_eq!(remapped(kc::ANSI_A, Modifiers::CONTROL), Modifiers::SUPER);
+    }
+
+    #[test]
+    fn ctrl_c_copies_a_selection() {
+        assert!(matches!(
+            shortcut(Some(kc::ANSI_C), Modifiers::CONTROL, true),
+            Some(Shortcut::AsSuper(Modifiers::SUPER))
+        ));
+    }
+
+    /// Without a selection there is nothing to copy, so the shell keeps its
+    /// interrupt.
+    #[test]
+    fn ctrl_c_stays_sigint_with_nothing_selected() {
+        assert!(shortcut(Some(kc::ANSI_C), Modifiers::CONTROL, false).is_none());
+    }
+
+    #[test]
+    fn other_ctrl_keys_reach_the_terminal() {
+        assert!(shortcut(Some(kc::ANSI_P), Modifiers::CONTROL, true).is_none());
+        assert!(shortcut(Some(kc::ANSI_D), Modifiers::CONTROL, true).is_none());
+    }
+
+    #[test]
+    fn unmodified_keys_reach_the_terminal() {
+        assert!(shortcut(Some(kc::ANSI_C), Modifiers::empty(), true).is_none());
+        assert!(shortcut(None, CTRL_SHIFT, false).is_none());
+    }
 }

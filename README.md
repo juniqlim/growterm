@@ -46,6 +46,44 @@ A terminal app that grows — GPU-accelerated terminal emulator written in Rust 
 | Cmd+Home / End | Scroll to top / bottom |
 | Cmd+Click | Open URL under cursor |
 | `` ` `` or Cmd+Shift+C | Enter / exit copy mode |
+| Cmd+P | Toggle pomodoro timer |
+| Cmd+R | Toggle response timer |
+| Cmd+Shift+R | Reload config |
+
+AI Coaching and Transparent Mode have no key of their own — use the View menu.
+
+### On Linux
+
+GNOME and X11 claim the Super key, so the shortcuts sit on Ctrl and Alt instead.
+There is no menu bar here either, so every View menu item gets a key.
+
+| Shortcut | Action |
+|---|---|
+| Ctrl+C | Copy selection |
+| Ctrl+V | Paste |
+| Ctrl+A | Copy input line to clipboard |
+| Ctrl+Shift+N | New window |
+| Ctrl+Shift+T | New tab |
+| Ctrl+Shift+W | Close tab |
+| Ctrl+Shift+F | Search |
+| Alt+1–9 | Switch to tab by number |
+| Alt+[ / Alt+] | Previous / next tab |
+| Ctrl+= / Ctrl+- | Zoom in / out |
+| Ctrl+Shift+PageUp/Down | Scroll one page |
+| Ctrl+Shift+Home / End | Scroll to top / bottom |
+| Ctrl+Shift+P | Toggle pomodoro timer |
+| Ctrl+Shift+R | Toggle response timer |
+| Ctrl+Shift+K | Toggle AI coaching |
+| Ctrl+Shift+O | Toggle transparent mode |
+| Ctrl+Shift+L | Reload config |
+
+**Ctrl+C copies only when something is selected.** With an empty selection it
+stays SIGINT, so a runaway program can still be stopped. Ctrl+V and Ctrl+A have
+no such tell, so they shadow the shell's literal-next and start-of-line keys —
+Ctrl+Shift+C/V/A do the same jobs if you would rather leave those alone.
+
+Copy mode is entered with `` ` ``. Cmd+Shift+C has no Linux counterpart, since
+Ctrl+Shift+C is copy here.
 
 ### Copy Mode
 
@@ -64,8 +102,8 @@ Settings are stored in `~/.config/growterm/config.toml`. All fields are optional
 font_family = "FiraCodeNerdFontMono-Retina"  # font name
 font_size = 32.0                              # font size in pt
 pomodoro = false                              # enable pomodoro timer
-pomodoro_work_minutes = 25                    # work duration
-pomodoro_break_minutes = 3                    # break duration
+pomodoro_work_seconds = 1500                  # work duration in seconds
+pomodoro_break_seconds = 180                  # break duration in seconds
 response_timer = false                        # enable response timer
 coaching = true                               # enable AI coaching
 coaching_command = "claude -p ..."            # custom coaching command
@@ -83,6 +121,7 @@ visual = "v"
 half_page_down = ["h", "d"]
 half_page_up = ["l", "u"]
 yank = "y"
+open_url = "o"
 exit = ["q", "Escape", "`"]
 ```
 

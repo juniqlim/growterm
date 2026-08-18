@@ -46,6 +46,44 @@
 | Cmd+Home / End | 최상단 / 최하단 스크롤 |
 | Cmd+Click | 커서 아래 URL 열기 |
 | `` ` `` 또는 Cmd+Shift+C | 복사 모드 진입 / 종료 |
+| Cmd+P | 뽀모도로 타이머 토글 |
+| Cmd+R | 응답 타이머 토글 |
+| Cmd+Shift+R | 설정 리로드 |
+
+AI 코칭과 반투명 모드는 전용 키가 없다. View 메뉴에서 켜고 끈다.
+
+### 리눅스에서
+
+GNOME과 X11이 Super 키를 가져가므로, 단축키는 Ctrl과 Alt 위에 놓인다.
+메뉴바도 없으므로 View 메뉴의 모든 항목에 키를 배정했다.
+
+| 단축키 | 동작 |
+|---|---|
+| Ctrl+C | 선택 영역 복사 |
+| Ctrl+V | 붙여넣기 |
+| Ctrl+A | 입력 줄 클립보드 복사 |
+| Ctrl+Shift+N | 새 창 |
+| Ctrl+Shift+T | 새 탭 |
+| Ctrl+Shift+W | 탭 닫기 |
+| Ctrl+Shift+F | 검색 |
+| Alt+1–9 | 탭 번호로 전환 |
+| Alt+[ / Alt+] | 이전 / 다음 탭 |
+| Ctrl+= / Ctrl+- | 줌 인 / 아웃 |
+| Ctrl+Shift+PageUp/Down | 한 페이지 스크롤 |
+| Ctrl+Shift+Home / End | 최상단 / 최하단 스크롤 |
+| Ctrl+Shift+P | 뽀모도로 타이머 토글 |
+| Ctrl+Shift+R | 응답 타이머 토글 |
+| Ctrl+Shift+K | AI 코칭 토글 |
+| Ctrl+Shift+O | 반투명 모드 토글 |
+| Ctrl+Shift+L | 설정 리로드 |
+
+**Ctrl+C는 선택 영역이 있을 때만 복사한다.** 선택이 없으면 SIGINT 그대로라,
+폭주하는 프로그램은 여전히 멈출 수 있다. Ctrl+V와 Ctrl+A는 그런 구분이
+불가능해서 셸의 literal-next와 줄 맨 앞 이동을 가린다. 그 둘을 남겨두고 싶으면
+Ctrl+Shift+C/V/A가 같은 일을 한다.
+
+복사 모드는 `` ` ``로 진입한다. Ctrl+Shift+C가 복사이므로 Cmd+Shift+C에
+대응하는 리눅스 키는 없다.
 
 ### 복사 모드
 
@@ -64,8 +102,8 @@
 font_family = "FiraCodeNerdFontMono-Retina"  # 폰트 이름
 font_size = 32.0                              # 폰트 크기 (pt)
 pomodoro = false                              # 뽀모도로 타이머 활성화
-pomodoro_work_minutes = 25                    # 작업 시간 (분)
-pomodoro_break_minutes = 3                    # 휴식 시간 (분)
+pomodoro_work_seconds = 1500                  # 작업 시간 (초)
+pomodoro_break_seconds = 180                  # 휴식 시간 (초)
 response_timer = false                        # 응답 타이머 활성화
 coaching = true                               # AI 코칭 활성화
 coaching_command = "claude -p ..."            # 커스텀 코칭 명령어
@@ -83,6 +121,7 @@ visual = "v"
 half_page_down = ["h", "d"]
 half_page_up = ["l", "u"]
 yank = "y"
+open_url = "o"
 exit = ["q", "Escape", "`"]
 ```
 

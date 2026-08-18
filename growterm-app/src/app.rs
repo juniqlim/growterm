@@ -280,6 +280,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
 
     macro_rules! do_render {
         () => {{
+            window.set_has_selection(!sel.is_empty());
             let search_hl = search_mode.highlight_ranges();
             let search_cur = search_mode.current_match().map(|m| (m.abs_row, m.col_start, m.col_end));
             let search_bar_info = if search_mode.active {
@@ -292,6 +293,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
             }
         }};
         (scrollbar: true) => {{
+            window.set_has_selection(!sel.is_empty());
             let search_hl = search_mode.highlight_ranges();
             let search_cur = search_mode.current_match().map(|m| (m.abs_row, m.col_start, m.col_end));
             let search_bar_info = if search_mode.active {

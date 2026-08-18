@@ -134,6 +134,9 @@ impl MacWindow {
         });
     }
 
+    /// Only Linux needs this — there Ctrl+C doubles as copy and SIGINT.
+    pub fn set_has_selection(&self, _has_selection: bool) {}
+
     pub fn set_pomodoro_checked(&self, checked: bool) {
         set_view_menu_item_checked(0, checked);
     }
