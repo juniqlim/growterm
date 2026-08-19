@@ -1561,3 +1561,33 @@ fn erasing_after_shrinking_past_the_alt_screen_stays_in_bounds() {
     grid.apply(&TerminalCommand::EraseInDisplay(0));
     grid.apply(&TerminalCommand::EraseInLine(0));
 }
+
+// === Erasing while the cursor waits past the last column ===
+
+/// Printing into the last column leaves the cursor one past it, waiting to
+/// wrap. Erasing back to the cursor then walked off the end of the row.
+#[test]
+fn erase_to_cursor_survives_a_pending_wrap() {
+    let mut grid = Grid::new(4, 2);
+    for c in "abcd".chars() {
+        grid.apply(&TerminalCommand::Print(c));
+    }
+
+    grid.apply(&TerminalCommand::EraseInLine(1));
+
+    for cell in &grid.cells()[0] {
+        assert_eq!(cell.character, ' ');
+    }
+}
+
+#[test]
+fn erase_from_cursor_survives_a_pending_wrap() {
+    let mut grid = Grid::new(4, 2);
+    for c in "abcd".chars() {
+        grid.apply(&TerminalCommand::Print(c));
+    }
+
+    grid.apply(&TerminalCommand::EraseInLine(0));
+
+    assert_eq!(grid.cells()[0][0].character, 'a');
+}

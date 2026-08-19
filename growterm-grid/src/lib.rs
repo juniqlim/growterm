@@ -583,7 +583,10 @@ impl Grid {
                 }
             }
             1 => {
-                for col in 0..=self.cursor_col {
+                // The cursor sits one past the last column while a wrap is
+                // pending, and that column does not exist.
+                let end = (self.cursor_col + 1).min(self.cols);
+                for col in 0..end {
                     self.cells[row][col] = blank;
                 }
             }
