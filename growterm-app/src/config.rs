@@ -232,7 +232,7 @@ pub fn config_dir() -> PathBuf {
     PathBuf::from(home).join(".config").join("growterm")
 }
 
-fn config_path() -> PathBuf {
+pub fn config_path() -> PathBuf {
     config_dir().join("config.toml")
 }
 

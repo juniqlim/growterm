@@ -16,6 +16,7 @@ pub struct MacWindow {
     window: Window,
     copy_mode: AtomicBool,
     has_selection: AtomicBool,
+    sender: std::sync::OnceLock<mpsc::Sender<AppEvent>>,
 }
 
 impl MacWindow {
@@ -24,6 +25,15 @@ impl MacWindow {
             window,
             copy_mode: AtomicBool::new(false),
             has_selection: AtomicBool::new(false),
+            sender: std::sync::OnceLock::new(),
+        }
+    }
+
+    /// Reload whenever the config file changes, so editing it is the whole
+    /// gesture — no key to remember, and the desktop's menu can just write.
+    pub fn watch_config(&self, path: std::path::PathBuf) {
+        if let Some(sender) = self.sender.get() {
+            crate::config_watch::spawn(path, sender.clone());
         }
     }
 
@@ -182,6 +192,7 @@ where
         raw_window.set_ime_allowed(true);
         let window = Arc::new(MacWindow::new(raw_window));
         let (tx, rx) = mpsc::channel();
+        let _ = window.sender.set(tx.clone());
         self.sender = Some(tx);
 
         if let Some(setup) = self.setup.take() {

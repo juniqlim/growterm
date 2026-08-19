@@ -1,3 +1,4 @@
+mod config_watch;
 mod event;
 pub mod key_convert;
 mod window;
