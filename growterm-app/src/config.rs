@@ -342,6 +342,20 @@ impl Config {
             .unwrap_or([0.0, 0.0, 0.0])
     }
 
+    /// Flip one of the settings the desktop's menu offers. Unknown names are
+    /// refused rather than guessed at, so a typo in the .desktop file shows up.
+    pub fn toggle(&mut self, name: &str) -> bool {
+        let field = match name {
+            "pomodoro" => &mut self.pomodoro,
+            "coaching" => &mut self.coaching,
+            "response-timer" => &mut self.response_timer,
+            "transparent-tab-bar" => &mut self.transparent_tab_bar,
+            _ => return false,
+        };
+        *field = !*field;
+        true
+    }
+
     pub fn save(&self) {
         let dir = config_dir();
         let _ = std::fs::create_dir_all(&dir);
@@ -634,6 +648,50 @@ mod unfocused_tint_tests {
     fn an_unreadable_colour_falls_back_to_the_default() {
         let config: Config = toml::from_str("unfocused_tint_color = \"not a colour\"\n").unwrap();
         assert_eq!(config.unfocused_tint_rgb(), [0.8, 0.0, 0.0]);
+    }
+}
+
+#[cfg(test)]
+mod toggle_tests {
+    use super::*;
+
+    #[test]
+    fn a_toggle_flips_its_setting() {
+        let mut config = Config::default();
+        assert!(!config.pomodoro);
+
+        assert!(config.toggle("pomodoro"));
+
+        assert!(config.pomodoro);
+    }
+
+    #[test]
+    fn a_toggle_flips_back() {
+        let mut config = Config::default();
+
+        config.toggle("response-timer");
+        config.toggle("response-timer");
+
+        assert!(!config.response_timer);
+    }
+
+    #[test]
+    fn every_name_the_desktop_menu_uses_is_known() {
+        let mut config = Config::default();
+
+        for name in ["pomodoro", "coaching", "response-timer", "transparent-tab-bar"] {
+            assert!(config.toggle(name), "{name} should be a setting");
+        }
+    }
+
+    #[test]
+    fn an_unknown_name_changes_nothing() {
+        let mut config = Config::default();
+        let before = config.clone();
+
+        assert!(!config.toggle("pomodoro-timer"));
+
+        assert_eq!(config, before);
     }
 }
 

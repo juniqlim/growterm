@@ -12,6 +12,17 @@ mod tab;
 mod url;
 mod zoom;
 
+/// `growterm --toggle pomodoro` flips a setting and leaves. The desktop's menu
+/// runs a command, and the windows already watch the config file, so that is
+/// the whole of it — no talking to a running window.
+fn toggle_argument() -> Option<String> {
+    let mut args = std::env::args().skip(1);
+    match args.next()?.as_str() {
+        "--toggle" => args.next(),
+        other => other.strip_prefix("--toggle=").map(str::to_string),
+    }
+}
+
 fn main() {
     // Install panic hook to log panics with backtrace to file
     let default_hook = std::panic::take_hook();
@@ -35,6 +46,16 @@ fn main() {
             });
         default_hook(info);
     }));
+
+    if let Some(name) = toggle_argument() {
+        let mut config = config::Config::load();
+        if !config.toggle(&name) {
+            eprintln!("growterm: unknown setting '{name}'");
+            std::process::exit(1);
+        }
+        config.save();
+        return;
+    }
 
     let config = config::Config::load();
     let font_size = config.font_size;
