@@ -92,6 +92,22 @@ fn apply_scrollbar_drag(tabs: &TabManager, y: f64, screen_h: f32, tab_bar_offset
     }
 }
 
+/// The title bar just appeared or vanished, so the rows that fit changed.
+/// Without this the grid keeps its old row count and its last row is drawn
+/// off the bottom edge — you type and nothing shows up.
+fn refit_tabs_to_bars(
+    tabs: &mut TabManager,
+    window: &MacWindow,
+    drawer: &GpuDrawer,
+    title_bar_height: f32,
+) {
+    let (cw, ch) = drawer.cell_size();
+    let (w, h) = window.inner_size();
+    let cols = (w as f32 / cw).floor().max(1.0) as u16;
+    let rows = tabs.term_rows(h, ch, drawer.tab_bar_height(), title_bar_height);
+    resize_all_tabs(tabs, cols, rows);
+}
+
 /// Resize all tabs to the given grid dimensions.
 fn resize_all_tabs(tabs: &mut TabManager, cols: u16, rows: u16) {
     for tab in tabs.tabs_mut() {
@@ -410,12 +426,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                         let (cols, _rows) = zoom::calc_grid_size(w, h, cw, ch);
                         let had_no_tab_bar = !tabs.show_tab_bar();
                         // After adding a tab, tab bar will show — compute rows with tab bar
-                        let next_title_bar_height = if transparent_tab_bar {
-                            title_bar_height
-                        } else {
-                            0.0
-                        };
-                        let term_rows = tabs.term_rows(h, ch, drawer.tab_bar_height(), next_title_bar_height);
+                        let term_rows = tabs.term_rows_with_tab_bar(h, ch, drawer.tab_bar_height(), title_bar_height);
                         let active_cwd = tabs
                             .active_tab()
                             .and_then(|t| t.pty_writer.child_pid())
@@ -1293,6 +1304,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                 } else {
                     0.0
                 };
+                refit_tabs_to_bars(&mut tabs, &window, &drawer, title_bar_height);
             }
             AppEvent::FocusChanged(focused) => {
                 window_focused = focused;
@@ -1351,6 +1363,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     } else {
                         0.0
                     };
+                    refit_tabs_to_bars(&mut tabs, &window, &drawer, title_bar_height);
                 }
                 header_opacity = new_config.header_opacity;
                 copy_mode_action_map = new_config.copy_mode_keys.build_action_map();

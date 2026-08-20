@@ -117,6 +117,17 @@ pub fn content_y_offset(
     }
 }
 
+fn rows_below_bars(
+    show_tab_bar: bool,
+    screen_h: u32,
+    cell_h: f32,
+    tab_bar_h: f32,
+    title_bar_h: f32,
+) -> u16 {
+    let y_off = content_y_offset(show_tab_bar, tab_bar_h, title_bar_h, false);
+    ((screen_h as f32 - y_off) / cell_h).floor().max(1.0) as u16
+}
+
 impl TabManager {
     pub fn new() -> Self {
         Self {
@@ -217,8 +228,19 @@ impl TabManager {
     /// Terminal rows adjusted for title/tab bar offsets.
     /// Always uses has_scrollback=false so PTY row count stays stable.
     pub fn term_rows(&self, screen_h: u32, cell_h: f32, tab_bar_h: f32, title_bar_h: f32) -> u16 {
-        let y_off = content_y_offset(self.show_tab_bar(), tab_bar_h, title_bar_h, false);
-        ((screen_h as f32 - y_off) / cell_h).floor().max(1.0) as u16
+        rows_below_bars(self.show_tab_bar(), screen_h, cell_h, tab_bar_h, title_bar_h)
+    }
+
+    /// Rows for a layout whose tab bar is showing, even if it is not showing
+    /// yet — the tab about to be added is what makes it appear.
+    pub fn term_rows_with_tab_bar(
+        &self,
+        screen_h: u32,
+        cell_h: f32,
+        tab_bar_h: f32,
+        title_bar_h: f32,
+    ) -> u16 {
+        rows_below_bars(true, screen_h, cell_h, tab_bar_h, title_bar_h)
     }
 
     /// Y pixel offset for mouse events — mirrors renderer y_off logic.
@@ -1762,6 +1784,16 @@ mod tests {
         mgr.add_tab(dummy_tab());
         // title_bar + tab_bar subtracted, (600 - 60 - 30) / 20 = 25
         assert_eq!(mgr.term_rows(600, 20.0, 30.0, 60.0), 25);
+    }
+
+    #[test]
+    fn rows_for_the_tab_bar_that_is_about_to_appear() {
+        let mut mgr = TabManager::new();
+        mgr.add_tab(dummy_tab());
+        // Only one tab, so the bar is hidden — but a second tab is coming and
+        // the rows have to leave room for the bar it will bring.
+        // (600 - 30) / 20 = 28
+        assert_eq!(mgr.term_rows_with_tab_bar(600, 20.0, 30.0, 0.0), 28);
     }
 
     #[test]
