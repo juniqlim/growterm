@@ -278,6 +278,9 @@ impl vte::Perform for Handler {
                     .push(TerminalCommand::SetScrollRegion { top, bottom });
             }
             'm' => self.handle_sgr(params),
+            'n' if first == 6 => self
+                .commands
+                .push(TerminalCommand::RequestCursorPosition),
             _ => {} // ignore unknown CSI
         }
     }
@@ -928,6 +931,19 @@ mod tests {
     }
 
     // --- Alternate Screen Buffer ---
+
+    #[test]
+    fn cursor_position_request_arrives_in_stream_order() {
+        let mut parser = VtParser::new();
+        let cmds = parser.parse(b"\x1b[6n\n");
+        assert_eq!(
+            cmds,
+            vec![
+                TerminalCommand::RequestCursorPosition,
+                TerminalCommand::Newline
+            ]
+        );
+    }
 
     #[test]
     fn parse_enter_alt_screen() {

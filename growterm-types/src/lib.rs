@@ -88,6 +88,9 @@ pub struct RenderCommand {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TerminalCommand {
     Print(char),
+    /// `CSI 6n`. It rides with the other commands so the answer can be the
+    /// cursor as it stood right here, not wherever the read left it.
+    RequestCursorPosition,
     CursorUp(u16),
     CursorDown(u16),
     CursorForward(u16),

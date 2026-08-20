@@ -407,9 +407,17 @@ fn start_io_thread(
                     for cmd in &commands {
                         state.grid.apply(cmd);
                         kitty_keyboard_state.apply_terminal_command(cmd);
-                    }
-                    if state.grid.scroll_offset() == 0 {
-                        state.grid.reset_scroll();
+                        // Answer where the cursor is now, mid-stream. Waiting
+                        // until the read is applied would report wherever the
+                        // rest of the output left it.
+                        if *cmd == TerminalCommand::RequestCursorPosition {
+                            responses.push(encode_terminal_query_response(
+                                TerminalQuery::CursorPositionReport,
+                                state.grid.cursor_pos(),
+                                kitty_keyboard_state.current_flags(),
+                                state.palette,
+                            ));
+                        }
                     }
                     let cursor = state.grid.cursor_pos();
                     for control in controls {
@@ -606,11 +614,6 @@ fn extract_terminal_controls(pending: &mut Vec<u8>) -> Vec<TerminalControl> {
         }
 
         let rest = &pending[i..];
-        if rest.starts_with(b"\x1b[6n") {
-            controls.push(TerminalControl::Query(TerminalQuery::CursorPositionReport));
-            i += 4;
-            continue;
-        }
         if rest.starts_with(b"\x1b[?2026h") {
             controls.push(TerminalControl::SyncOutputBegin);
             i += 8;
@@ -808,7 +811,6 @@ fn is_known_control_prefix(rest: &[u8]) -> bool {
         b"\x1b[?1003l".as_slice(),
         b"\x1b[?1006h".as_slice(),
         b"\x1b[?1006l".as_slice(),
-        b"\x1b[6n".as_slice(),
         b"\x1b[?u".as_slice(),
         b"\x1b[c".as_slice(),
         b"\x1b[>c".as_slice(),
@@ -1407,12 +1409,11 @@ mod tests {
 
     #[test]
     fn extract_terminal_queries_detects_known_queries() {
-        let mut pending = b"\x1b[6n\x1b[?u\x1b[c\x1b[>0c".to_vec();
+        let mut pending = b"\x1b[?u\x1b[c\x1b[>0c".to_vec();
         let controls = extract_terminal_controls(&mut pending);
         assert_eq!(
             controls,
             vec![
-                TerminalControl::Query(TerminalQuery::CursorPositionReport),
                 TerminalControl::Query(TerminalQuery::KittyKeyboardQuery),
                 TerminalControl::Query(TerminalQuery::PrimaryDeviceAttributes),
                 TerminalControl::Query(TerminalQuery::SecondaryDeviceAttributes),
@@ -1423,10 +1424,20 @@ mod tests {
 
     #[test]
     fn extract_terminal_queries_keeps_partial_sequence() {
-        let mut pending = b"\x1b[6".to_vec();
+        let mut pending = b"\x1b[>".to_vec();
         let controls = extract_terminal_controls(&mut pending);
         assert!(controls.is_empty());
-        assert_eq!(pending, b"\x1b[6");
+        assert_eq!(pending, b"\x1b[>");
+    }
+
+    #[test]
+    fn the_cursor_query_is_left_to_the_parser_to_keep_it_in_order() {
+        // Answering it here would report where the cursor ended up after the
+        // whole read, not where it was when the query came through.
+        let mut pending = b"\x1b[6n".to_vec();
+        let controls = extract_terminal_controls(&mut pending);
+        assert!(controls.is_empty());
+        assert!(pending.is_empty());
     }
 
     #[test]

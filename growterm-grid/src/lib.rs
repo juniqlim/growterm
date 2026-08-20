@@ -152,6 +152,8 @@ impl Grid {
                 }
             }
             TerminalCommand::Bell => {}
+            // The grid holds no answer; the reader writes one back.
+            TerminalCommand::RequestCursorPosition => {}
             TerminalCommand::ShowCursor => self.cursor_visible = true,
             TerminalCommand::HideCursor => self.cursor_visible = false,
             TerminalCommand::DeleteChars(n) => self.delete_chars(*n),
