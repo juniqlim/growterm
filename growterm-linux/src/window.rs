@@ -268,12 +268,6 @@ where
                 }
 
                 match claimed {
-                    Some(Shortcut::Fire(event)) => {
-                        if event_type == growterm_types::KeyEventType::Press {
-                            self.send(event);
-                        }
-                        return;
-                    }
                     Some(Shortcut::AsSuper(remapped)) => modifiers = remapped,
                     None => {}
                 }
@@ -379,9 +373,6 @@ pub fn run(
 enum Shortcut {
     /// Stand in these modifiers, so the handlers growterm-app shares with macOS run.
     AsSuper(Modifiers),
-    /// Raise directly — macOS raises these from its View menu, which X11 has no
-    /// counterpart for.
-    Fire(AppEvent),
 }
 
 /// GNOME and X11 claim the Super key, so Linux app shortcuts are built on
@@ -399,12 +390,10 @@ fn shortcut(
     let alt = modifiers.contains(Modifiers::ALT);
 
     if ctrl && shift {
-        let event = match key {
-            kc::ANSI_P => AppEvent::TogglePomodoro,
-            kc::ANSI_R => AppEvent::ToggleResponseTimer,
-            kc::ANSI_K => AppEvent::ToggleCoaching,
-            kc::ANSI_O => AppEvent::ToggleTransparentTabBar,
-            kc::ANSI_L => AppEvent::ReloadConfig,
+        // The toggles and the config reload are not here: the toggles live in
+        // the dock's right-click menu, the config reloads itself when the file
+        // changes, and the app running inside wants their letters.
+        match key {
             // New window/tab, close tab, copy, paste, copy input line, search,
             // and scrollback — all keyed on Cmd over on macOS.
             kc::ANSI_N
@@ -419,8 +408,7 @@ fn shortcut(
             | kc::HOME
             | kc::END => return Some(Shortcut::AsSuper(Modifiers::SUPER)),
             _ => return None,
-        };
-        return Some(Shortcut::Fire(event));
+        }
     }
 
     if ctrl {
@@ -499,13 +487,6 @@ mod tests {
     use crate::key_convert::keycode as kc;
 
     const CTRL_SHIFT: Modifiers = Modifiers::CONTROL.union(Modifiers::SHIFT);
-
-    fn fired(keycode: u16, modifiers: Modifiers) -> AppEvent {
-        match shortcut(Some(keycode), modifiers, false) {
-            Some(Shortcut::Fire(event)) => event,
-            other => panic!("expected a fired event, got {other:?}"),
-        }
-    }
 
     fn remapped(keycode: u16, modifiers: Modifiers) -> Modifiers {
         match shortcut(Some(keycode), modifiers, false) {
@@ -593,43 +574,16 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_shift_p_toggles_pomodoro() {
-        assert!(matches!(
-            fired(kc::ANSI_P, CTRL_SHIFT),
-            AppEvent::TogglePomodoro
-        ));
-    }
-
-    #[test]
-    fn ctrl_shift_r_toggles_response_timer() {
-        assert!(matches!(
-            fired(kc::ANSI_R, CTRL_SHIFT),
-            AppEvent::ToggleResponseTimer
-        ));
-    }
-
-    #[test]
-    fn ctrl_shift_k_toggles_coaching() {
-        assert!(matches!(
-            fired(kc::ANSI_K, CTRL_SHIFT),
-            AppEvent::ToggleCoaching
-        ));
-    }
-
-    #[test]
-    fn ctrl_shift_o_toggles_transparent_tab_bar() {
-        assert!(matches!(
-            fired(kc::ANSI_O, CTRL_SHIFT),
-            AppEvent::ToggleTransparentTabBar
-        ));
-    }
-
-    #[test]
-    fn ctrl_shift_l_reloads_config() {
-        assert!(matches!(
-            fired(kc::ANSI_L, CTRL_SHIFT),
-            AppEvent::ReloadConfig
-        ));
+    fn the_toggles_leave_their_letters_to_the_shell() {
+        // The toggles are in the dock's right-click menu and the config
+        // reloads itself, so the app running inside gets these chords —
+        // Claude Code reads Ctrl+Shift+R.
+        for key in [kc::ANSI_P, kc::ANSI_R, kc::ANSI_K, kc::ANSI_O, kc::ANSI_L] {
+            assert!(
+                shortcut(Some(key), CTRL_SHIFT, false).is_none(),
+                "ctrl+shift+{key:#x} should reach the shell"
+            );
+        }
     }
 
     #[test]
