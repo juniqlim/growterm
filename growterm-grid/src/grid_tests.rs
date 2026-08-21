@@ -562,6 +562,25 @@ fn erase_in_display_entire_screen() {
     }
 }
 
+/// `clear` ends with ESC[3J. Without it the screen looks empty and one scroll
+/// up brings the whole session back.
+#[test]
+fn erase_in_display_3_drops_the_scrollback() {
+    let mut grid = Grid::new(5, 2);
+    for _ in 0..6 {
+        grid.apply(&TerminalCommand::Print('x'));
+        grid.apply(&TerminalCommand::Newline);
+    }
+    assert!(grid.scrollback_len() > 0, "expected scrollback to fill");
+    grid.scroll_up_view(2);
+    assert!(grid.scroll_offset() > 0, "expected to be scrolled back");
+
+    grid.apply(&TerminalCommand::EraseInDisplay(3));
+
+    assert_eq!(grid.scrollback_len(), 0);
+    assert_eq!(grid.scroll_offset(), 0, "nothing left to look back at");
+}
+
 // === Erase preserves current background color ===
 
 #[test]

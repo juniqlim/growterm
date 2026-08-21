@@ -629,6 +629,12 @@ impl Grid {
                     }
                 }
             }
+            3 => {
+                // `clear` ends with this. Erasing the screen alone leaves the
+                // whole session one scroll away, which is not what it means.
+                self.scrollback.clear();
+                self.scroll_offset = 0;
+            }
             _ => {}
         }
     }
