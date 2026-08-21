@@ -12,14 +12,29 @@ mod tab;
 mod url;
 mod zoom;
 
-/// `growterm --toggle pomodoro` flips a setting and leaves. The desktop's menu
-/// runs a command, and the windows already watch the config file, so that is
-/// the whole of it — no talking to a running window.
-fn toggle_argument() -> Option<String> {
+/// The desktop's menu runs a command and leaves — `growterm --toggle pomodoro`,
+/// `growterm --reset pomodoro`. Each one writes a file the running windows
+/// already watch, so there is no talking to a window. This reads the word
+/// after the flag.
+fn flag_argument(flag: &str) -> Option<String> {
     let mut args = std::env::args().skip(1);
-    match args.next()?.as_str() {
-        "--toggle" => args.next(),
-        other => other.strip_prefix("--toggle=").map(str::to_string),
+    let first = args.next()?;
+    if first == flag {
+        return args.next();
+    }
+    first.strip_prefix(&format!("{flag}=")).map(str::to_string)
+}
+
+/// `growterm --reset pomodoro` touches a file the windows watch, and each one
+/// starts its work timer over.
+fn reset_pomodoro() {
+    let path = config::pomodoro_reset_path();
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Err(e) = std::fs::write(&path, "") {
+        eprintln!("growterm: cannot reset the pomodoro: {e}");
+        std::process::exit(1);
     }
 }
 
@@ -47,7 +62,16 @@ fn main() {
         default_hook(info);
     }));
 
-    if let Some(name) = toggle_argument() {
+    if let Some(name) = flag_argument("--reset") {
+        if name != "pomodoro" {
+            eprintln!("growterm: nothing named '{name}' can be reset");
+            std::process::exit(1);
+        }
+        reset_pomodoro();
+        return;
+    }
+
+    if let Some(name) = flag_argument("--toggle") {
         let mut config = config::Config::load();
         if !config.toggle(&name) {
             eprintln!("growterm: unknown setting '{name}'");

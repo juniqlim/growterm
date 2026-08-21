@@ -20,6 +20,7 @@ pub enum AppEvent {
     MouseMoved(f64, f64, Modifiers),
     FileDropped(Vec<String>),
     TogglePomodoro,
+    ResetPomodoro,
     ToggleResponseTimer,
     ToggleCoaching,
     ToggleTransparentTabBar,

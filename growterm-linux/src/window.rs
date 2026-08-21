@@ -31,10 +31,12 @@ impl MacWindow {
 
     /// Reload whenever the config file changes, so editing it is the whole
     /// gesture — no key to remember, and the desktop's menu can just write.
-    pub fn watch_config(&self, path: std::path::PathBuf) {
-        if let Some(sender) = self.sender.get() {
-            crate::config_watch::spawn(path, sender.clone());
-        }
+    /// The menu's pomodoro reset is not a setting, so it writes its own file
+    /// next to the config and this watches that too.
+    pub fn watch_config(&self, path: std::path::PathBuf, reset_path: std::path::PathBuf) {
+        let Some(sender) = self.sender.get() else { return };
+        crate::config_watch::spawn(path, sender.clone(), AppEvent::ReloadConfig);
+        crate::config_watch::spawn(reset_path, sender.clone(), AppEvent::ResetPomodoro);
     }
 
     pub fn inner_size(&self) -> (u32, u32) {

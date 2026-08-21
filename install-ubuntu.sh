@@ -39,8 +39,8 @@ mkdir -p "$BIN_DIR" "$APP_DIR"
 install -m 755 "$REPO_DIR/target/release/growterm" "$BIN_PATH"
 
 # StartupWMClass ties a running window to this file, which is what makes the
-# dock show the actions below on right-click. Each one flips a setting and
-# leaves; the running windows notice the config file changing.
+# dock show the actions below on right-click. Each one writes a file and
+# leaves; the running windows notice it changing.
 cat > "$DESKTOP_PATH" <<EOF
 [Desktop Entry]
 Type=Application
@@ -51,11 +51,15 @@ Terminal=false
 Categories=System;TerminalEmulator;
 Icon=utilities-terminal
 StartupWMClass=growterm
-Actions=Pomodoro;Coaching;ResponseTimer;TransparentTabBar;
+Actions=Pomodoro;ResetPomodoro;Coaching;ResponseTimer;TransparentTabBar;
 
 [Desktop Action Pomodoro]
 Name=포모도로 켜기/끄기
 Exec=$BIN_PATH --toggle pomodoro
+
+[Desktop Action ResetPomodoro]
+Name=포모도로 리셋 (25분부터 다시)
+Exec=$BIN_PATH --reset pomodoro
 
 [Desktop Action Coaching]
 Name=코칭 켜기/끄기

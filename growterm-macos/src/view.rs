@@ -240,6 +240,11 @@ define_class! {
             self.send_event(AppEvent::TogglePomodoro);
         }
 
+        #[unsafe(method(resetPomodoro:))]
+        fn reset_pomodoro(&self, _sender: &AnyObject) {
+            self.send_event(AppEvent::ResetPomodoro);
+        }
+
         #[unsafe(method(toggleResponseTimer:))]
         fn toggle_response_timer(&self, _sender: &AnyObject) {
             self.send_event(AppEvent::ToggleResponseTimer);

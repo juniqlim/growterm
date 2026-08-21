@@ -22,7 +22,7 @@ A terminal app that grows — GPU-accelerated terminal emulator written in Rust 
 - **Copy Mode** — Vim-style copy mode (Cmd+Shift+C) with hjkl navigation
 - **Mouse Selection & Clipboard** — Drag selection with wide character awareness, Cmd+C/V, Cmd+A to copy input line
 - **URL Highlight** — Cmd+hover to underline and detect URLs
-- **Pomodoro Timer** — Configurable work/break cycle with input blocking (default 25min/3min)
+- **Pomodoro Timer** — Configurable work/break cycle with input blocking (default 25min/3min), resettable from the menu
 - **Response Timer** — Per-tab command response time measurement
 - **Coaching** — AI coaching layer with word wrapping (uses Claude CLI)
 - **Font Zoom** — Cmd+=/- to adjust size (8pt–72pt)
@@ -50,12 +50,13 @@ A terminal app that grows — GPU-accelerated terminal emulator written in Rust 
 | Cmd+R | Toggle response timer |
 | Cmd+Shift+R | Reload config |
 
-AI Coaching and Transparent Mode have no key of their own — use the View menu.
+AI Coaching, Transparent Mode, and Reset Pomodoro have no key of their own — use the View menu.
 
 ### On Linux
 
 GNOME and X11 claim the Super key, so the shortcuts sit on Ctrl and Alt instead.
-There is no menu bar here either, so every View menu item gets a key.
+There is no menu bar here either — the toggles and Reset Pomodoro live in the
+dock icon's right-click menu.
 
 | Shortcut | Action |
 |---|---|

@@ -65,7 +65,7 @@ impl MacWindow {
 
     /// The menu bar already carries the toggles here, so nothing watches the
     /// config file yet.
-    pub fn watch_config(&self, _path: std::path::PathBuf) {}
+    pub fn watch_config(&self, _path: std::path::PathBuf, _reset_path: std::path::PathBuf) {}
 
     pub fn set_sender(&self, sender: Sender<AppEvent>) {
         self.view.set_sender(sender);

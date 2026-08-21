@@ -99,6 +99,19 @@ impl Pomodoro {
         }
     }
 
+    /// Start the work timer over from the beginning, whatever phase it was in.
+    pub fn reset(&mut self, tab_scrollback_lens: &[(u64, usize)]) {
+        self.reset_at(Instant::now(), tab_scrollback_lens);
+    }
+
+    fn reset_at(&mut self, now: Instant, tab_scrollback_lens: &[(u64, usize)]) {
+        if !self.enabled {
+            return;
+        }
+        self.phase = Phase::Idle;
+        self.on_input_at(now, tab_scrollback_lens);
+    }
+
     /// Called periodically. Transitions state if time elapsed.
     pub fn tick(&mut self) -> TickResult {
         self.tick_at(Instant::now())
@@ -746,4 +759,47 @@ mod tests {
         assert!(msg.ends_with('…'));
         assert_eq!(msg.chars().count(), "AI 호출 실패: ".chars().count() + MAX_ERROR_CHARS + 1);
     }
+
+    #[test]
+    fn reset_starts_the_work_timer_over() {
+        let mut p = enabled_pomodoro();
+        let now = Instant::now();
+        p.on_input_at(now, &[(0, 10)]);
+
+        let later = now + Duration::from_secs(20 * 60);
+        p.reset_at(later, &[(0, 90)]);
+
+        assert_eq!(p.phase(), Phase::Working);
+        let text = p.display_text_at(later).unwrap();
+        assert!(text.contains("25:00"), "expected a full work timer in {text:?}");
+        assert_eq!(p.scrollback_snapshot[&0], 90, "the new cycle watches from here");
+    }
+
+    #[test]
+    fn reset_during_break_goes_back_to_working() {
+        let mut p = enabled_pomodoro();
+        let now = Instant::now();
+        p.on_input_at(now, &[(0, 0)]);
+        let break_start = now + Duration::from_secs(DEFAULT_WORK_SECS);
+        p.tick_at(break_start);
+        p.set_ai_response(vec!["지난 사이클 코칭".to_string()]);
+        assert!(p.is_input_blocked());
+
+        p.reset_at(break_start + Duration::from_secs(10), &[(0, 5)]);
+
+        assert_eq!(p.phase(), Phase::Working);
+        assert!(!p.is_input_blocked(), "typing should be allowed again");
+        assert!(p.coaching_lines().is_none(), "the old coaching should be gone");
+    }
+
+    #[test]
+    fn reset_ignored_when_disabled() {
+        let mut p = Pomodoro::new(DEFAULT_WORK_SECS, DEFAULT_BREAK_SECS);
+
+        p.reset_at(Instant::now(), &[(0, 10)]);
+
+        assert_eq!(p.phase(), Phase::Idle);
+        assert!(p.scrollback_snapshot.is_empty());
+    }
+
 }

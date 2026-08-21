@@ -119,6 +119,16 @@ fn setup_main_menu(app: &NSApplication) {
         );
         view_menu.addItem(&pomodoro_item);
 
+        let reset_pomodoro_title = NSString::from_str("Reset Pomodoro");
+        let reset_pomodoro_key = NSString::from_str("");
+        let reset_pomodoro_item = NSMenuItem::initWithTitle_action_keyEquivalent(
+            mtm.alloc(),
+            &reset_pomodoro_title,
+            Some(objc2::sel!(resetPomodoro:)),
+            &reset_pomodoro_key,
+        );
+        view_menu.addItem(&reset_pomodoro_item);
+
         let response_timer_title = NSString::from_str("Response Timer");
         let response_timer_key = NSString::from_str("r");
         let response_timer_item = NSMenuItem::initWithTitle_action_keyEquivalent(

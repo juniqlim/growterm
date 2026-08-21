@@ -34,14 +34,14 @@ fn modified(path: &PathBuf) -> Option<SystemTime> {
     std::fs::metadata(path).ok()?.modified().ok()
 }
 
-/// Watch the config file and tell the app whenever it changes, so editing it —
-/// by hand or from the desktop's menu — is all it takes.
-pub fn spawn(path: PathBuf, sender: Sender<AppEvent>) {
+/// Watch a file and tell the app whenever it changes, so writing it — by hand
+/// or from the desktop's menu — is all it takes.
+pub fn spawn(path: PathBuf, sender: Sender<AppEvent>, event: AppEvent) {
     std::thread::spawn(move || {
         let mut watch = ConfigWatch::new(path);
         loop {
             std::thread::sleep(INTERVAL);
-            if watch.changed() && sender.send(AppEvent::ReloadConfig).is_err() {
+            if watch.changed() && sender.send(event.clone()).is_err() {
                 return;
             }
         }
@@ -108,4 +108,24 @@ mod tests {
 
         let _ = std::fs::remove_file(&path);
     }
+
+    #[test]
+    fn a_touched_file_sends_its_event() {
+        let path = temp_path("touched");
+        let (sender, receiver) = std::sync::mpsc::channel();
+        spawn(path.clone(), sender, AppEvent::ResetPomodoro);
+
+        // The watcher reads the file once before its first sleep, so touch it
+        // again until one of the touches lands after that read.
+        let event = (0..5)
+            .find_map(|_| {
+                write(&path, "");
+                receiver.recv_timeout(INTERVAL * 2).ok()
+            })
+            .expect("the touch should reach the app");
+        assert!(matches!(event, AppEvent::ResetPomodoro));
+
+        let _ = std::fs::remove_file(&path);
+    }
+
 }

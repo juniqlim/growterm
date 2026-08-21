@@ -236,6 +236,12 @@ pub fn config_path() -> PathBuf {
     config_dir().join("config.toml")
 }
 
+/// Touched by `growterm --reset pomodoro`. Running windows watch it, so the
+/// desktop's menu can reset a timer it cannot talk to.
+pub fn pomodoro_reset_path() -> PathBuf {
+    config_dir().join("pomodoro-reset")
+}
+
 impl Config {
     pub fn load() -> Self {
         let path = config_path();

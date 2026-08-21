@@ -34,6 +34,7 @@ pub enum AppEvent {
     FileDropped(Vec<String>),
     /// 뽀모도로 타이머 토글
     TogglePomodoro,
+    ResetPomodoro,
     /// 응답 타이머 토글
     ToggleResponseTimer,
     /// AI 코칭 토글

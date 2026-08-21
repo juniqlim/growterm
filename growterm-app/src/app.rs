@@ -274,7 +274,7 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
     let mut transparent_tab_bar = config.transparent_tab_bar;
     let mut header_opacity = config.header_opacity;
     window.set_transparent_tab_bar_checked(transparent_tab_bar);
-    window.watch_config(crate::config::config_path());
+    window.watch_config(crate::config::config_path(), crate::config::pomodoro_reset_path());
     window.set_transparent_mode(transparent_tab_bar);
     let title_bar_height = if transparent_tab_bar {
         window.title_bar_height() as f32
@@ -1261,6 +1261,14 @@ pub fn run(window: Arc<MacWindow>, rx: mpsc::Receiver<AppEvent>, mut drawer: Gpu
                     window.set_coaching_checked(false);
                 }
                 config.save();
+                if let Some(title) =
+                    maybe_remember_title_update(&mut last_title, build_title(&pomodoro, &tabs))
+                {
+                    window.set_title(&title);
+                }
+            }
+            AppEvent::ResetPomodoro => {
+                pomodoro.reset(&tab_scrollback_lens(&tabs));
                 if let Some(title) =
                     maybe_remember_title_update(&mut last_title, build_title(&pomodoro, &tabs))
                 {
