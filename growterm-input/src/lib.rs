@@ -43,7 +43,10 @@ pub fn encode_with_kitty_flags_and_event_type(
             }
         }
         Key::Char(c) if has_ctrl && c.is_ascii_alphabetic() => {
-            if disambiguate || has_shift {
+            // Shift alone is not enough to leave the legacy encoding: an app
+            // that never asked for the kitty protocol cannot read CSI u, and
+            // would lose the key entirely.
+            if disambiguate || report_all {
                 return encode_kitty_text_key(c, event.modifiers, kitty_event_type);
             }
             // Ctrl+A = 0x01, Ctrl+Z = 0x1A
@@ -622,6 +625,24 @@ mod tests {
     fn ctrl_alt_arrow_up() {
         let event = KeyEvent { key: Key::ArrowUp, modifiers: Modifiers::CTRL | Modifiers::ALT };
         assert_eq!(encode(event), b"\x1b[1;7A");
+    }
+
+    // --- Ctrl+Shift+letter ---
+
+    /// Every other terminal drops the shift here, and an app that never asked
+    /// for the kitty protocol cannot read CSI u — it would just lose the key.
+    #[test]
+    fn ctrl_shift_letter_is_the_plain_control_byte() {
+        let event = KeyEvent { key: Key::Char('R'), modifiers: Modifiers::CTRL | Modifiers::SHIFT };
+        assert_eq!(encode(event), vec![0x12]);
+    }
+
+    /// Once an app negotiates the protocol, the shift can be told apart.
+    #[test]
+    fn ctrl_shift_letter_is_csi_u_once_kitty_is_on() {
+        let event = KeyEvent { key: Key::Char('R'), modifiers: Modifiers::CTRL | Modifiers::SHIFT };
+        let bytes = encode_with_kitty_flags(event, KITTY_KEYBOARD_DISAMBIGUATE_ESCAPES);
+        assert_eq!(bytes, b"\x1b[114;6u");
     }
 
     // --- Shift char (no special encoding) ---
