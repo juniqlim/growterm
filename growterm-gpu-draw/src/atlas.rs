@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use crate::platform_font::{self, FontCandidates};
 
@@ -12,11 +12,33 @@ pub struct RasterizedGlyph {
     pub offset_y: f32,
 }
 
+/// The bold and CJK fonts cost ~200MB apiece once fontdue has parsed every
+/// glyph, and a session that draws neither Korean nor bold text never needs
+/// them. They load on first use, and every atlas in the window shares them.
+#[derive(Clone, Default)]
+pub struct LazyFonts {
+    fallback: Arc<OnceLock<fontdue::Font>>,
+    bold: Arc<OnceLock<fontdue::Font>>,
+    bold_fallback: Arc<OnceLock<fontdue::Font>>,
+}
+
+impl LazyFonts {
+    fn fallback(&self, size: f32) -> &fontdue::Font {
+        self.fallback.get_or_init(|| GlyphAtlas::load_fallback_font(size))
+    }
+
+    fn bold(&self, size: f32) -> &fontdue::Font {
+        self.bold.get_or_init(|| GlyphAtlas::load_builtin_bold_font(size))
+    }
+
+    fn bold_fallback(&self, size: f32) -> &fontdue::Font {
+        self.bold_fallback.get_or_init(|| GlyphAtlas::load_fallback_bold_font(size))
+    }
+}
+
 pub struct GlyphAtlas {
     font: Arc<fontdue::Font>,
-    fallback_font: Arc<fontdue::Font>,
-    bold_font: Arc<fontdue::Font>,
-    bold_fallback_font: Arc<fontdue::Font>,
+    fonts: LazyFonts,
     system_font_cache: HashMap<PathBuf, fontdue::Font>,
     char_to_font_path: HashMap<char, PathBuf>,
     size: f32,
@@ -37,16 +59,12 @@ impl GlyphAtlas {
     /// Same as `new`, with the OS font lookup supplied by the caller.
     pub fn with_candidates(size: f32, font_path: Option<&str>, font_candidates: FontCandidates) -> Self {
         let font = Arc::new(Self::load_font(size, font_path));
-        let fallback_font = Arc::new(Self::load_fallback_font(size));
-        let bold_font = Arc::new(Self::load_builtin_bold_font(size));
-        let bold_fallback_font = Arc::new(Self::load_fallback_bold_font(size));
-        let mut atlas =
-            Self::with_shared_fonts(size, font, fallback_font, bold_font, bold_fallback_font);
+        let mut atlas = Self::with_shared_fonts(size, font, LazyFonts::default());
         atlas.font_candidates = font_candidates;
         atlas
     }
 
-    pub fn with_shared_fonts(size: f32, font: Arc<fontdue::Font>, fallback_font: Arc<fontdue::Font>, bold_font: Arc<fontdue::Font>, bold_fallback_font: Arc<fontdue::Font>) -> Self {
+    pub fn with_shared_fonts(size: f32, font: Arc<fontdue::Font>, fonts: LazyFonts) -> Self {
         let metrics = font.metrics('M', size);
         let line_metrics = font.horizontal_line_metrics(size);
         let (cell_height, ascent) = match line_metrics {
@@ -56,9 +74,7 @@ impl GlyphAtlas {
 
         Self {
             font,
-            fallback_font,
-            bold_font,
-            bold_fallback_font,
+            fonts,
             system_font_cache: HashMap::new(),
             char_to_font_path: HashMap::new(),
             size,
@@ -159,6 +175,18 @@ impl GlyphAtlas {
         self.cell_width = metrics.advance_width.ceil();
     }
 
+    fn fallback_font(&self) -> &fontdue::Font {
+        self.fonts.fallback(self.size)
+    }
+
+    fn bold_font(&self) -> &fontdue::Font {
+        self.fonts.bold(self.size)
+    }
+
+    fn bold_fallback_font(&self) -> &fontdue::Font {
+        self.fonts.bold_fallback(self.size)
+    }
+
     pub fn cell_size(&self) -> (f32, f32) {
         (self.cell_width, self.cell_height)
     }
@@ -229,7 +257,7 @@ impl GlyphAtlas {
     pub fn get_or_insert(&mut self, c: char) -> &RasterizedGlyph {
         if !self.cache.contains_key(&c) {
             // find_system_font borrows &mut self, so call it before taking &self refs
-            let system_font_path = if self.font.lookup_glyph_index(c) != 0 || self.fallback_font.lookup_glyph_index(c) != 0 {
+            let system_font_path = if self.font.lookup_glyph_index(c) != 0 || self.fallback_font().lookup_glyph_index(c) != 0 {
                 None
             } else if self.find_system_font(c) {
                 Some(self.char_to_font_path.get(&c).unwrap().clone())
@@ -239,8 +267,8 @@ impl GlyphAtlas {
 
             let font: &fontdue::Font = if self.font.lookup_glyph_index(c) != 0 {
                 &self.font
-            } else if self.fallback_font.lookup_glyph_index(c) != 0 {
-                &self.fallback_font
+            } else if self.fallback_font().lookup_glyph_index(c) != 0 {
+                self.fallback_font()
             } else if let Some(ref path) = system_font_path {
                 self.system_font_cache.get(path).unwrap()
             } else {
@@ -262,15 +290,15 @@ impl GlyphAtlas {
 
     pub fn get_or_insert_bold(&mut self, c: char) -> &RasterizedGlyph {
         if !self.bold_cache.contains_key(&c) {
-            let font: &fontdue::Font = if self.bold_font.lookup_glyph_index(c) != 0 {
-                &self.bold_font
-            } else if self.bold_fallback_font.lookup_glyph_index(c) != 0 {
-                &self.bold_fallback_font
+            let font: &fontdue::Font = if self.bold_font().lookup_glyph_index(c) != 0 {
+                self.bold_font()
+            } else if self.bold_fallback_font().lookup_glyph_index(c) != 0 {
+                self.bold_fallback_font()
             } else if self.font.lookup_glyph_index(c) != 0 {
                 // Fallback to normal font if no bold variant has this glyph
                 &self.font
-            } else if self.fallback_font.lookup_glyph_index(c) != 0 {
-                &self.fallback_font
+            } else if self.fallback_font().lookup_glyph_index(c) != 0 {
+                self.fallback_font()
             } else {
                 &self.font
             };
@@ -292,6 +320,49 @@ impl GlyphAtlas {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fallback_font_loads_only_when_a_glyph_needs_it() {
+        let mut atlas = GlyphAtlas::new(16.0, None);
+
+        atlas.get_or_insert('a');
+
+        assert!(atlas.fonts.fallback.get().is_none(), "라틴 글자에 한글 폰트는 필요 없다");
+
+        atlas.get_or_insert('한');
+
+        assert!(atlas.fonts.fallback.get().is_some());
+    }
+
+    #[test]
+    fn bold_fonts_load_only_when_bold_is_drawn() {
+        let mut atlas = GlyphAtlas::new(16.0, None);
+
+        atlas.get_or_insert('a');
+
+        assert!(atlas.fonts.bold.get().is_none());
+
+        atlas.get_or_insert_bold('a');
+
+        assert!(atlas.fonts.bold.get().is_some());
+        assert!(atlas.fonts.bold_fallback.get().is_none(), "라틴 볼드에 한글 볼드는 필요 없다");
+
+        atlas.get_or_insert_bold('한');
+
+        assert!(atlas.fonts.bold_fallback.get().is_some());
+    }
+
+    #[test]
+    fn atlases_sharing_lazy_fonts_load_them_once() {
+        let fonts = LazyFonts::default();
+        let font = Arc::new(GlyphAtlas::load_builtin_font(16.0));
+        let mut atlas = GlyphAtlas::with_shared_fonts(16.0, font.clone(), fonts.clone());
+        let tab_atlas = GlyphAtlas::with_shared_fonts(12.8, font, fonts);
+
+        atlas.get_or_insert('한');
+
+        assert!(tab_atlas.fonts.fallback.get().is_some(), "한 아틀라스가 로드하면 다른 아틀라스도 그것을 쓴다");
+    }
 
     #[test]
     fn bold_glyph_differs_from_normal() {

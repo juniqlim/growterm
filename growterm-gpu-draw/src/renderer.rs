@@ -3,7 +3,7 @@ use wgpu::util::DeviceExt;
 
 use unicode_width::UnicodeWidthChar;
 
-use crate::atlas::GlyphAtlas;
+use crate::atlas::{GlyphAtlas, LazyFonts};
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -398,13 +398,10 @@ impl GpuDrawer {
         });
 
         let font = std::sync::Arc::new(GlyphAtlas::load_font(font_size, font_path));
-        let fallback_font = std::sync::Arc::new(GlyphAtlas::load_fallback_font(font_size));
-        let bold_font = std::sync::Arc::new(GlyphAtlas::load_builtin_bold_font(font_size));
-        let bold_fallback_font = std::sync::Arc::new(GlyphAtlas::load_fallback_bold_font(font_size));
-        let atlas = GlyphAtlas::with_shared_fonts(font_size, font, fallback_font.clone(), bold_font, bold_fallback_font.clone());
-        let tab_bold_font = std::sync::Arc::new(GlyphAtlas::load_builtin_bold_font(TAB_FONT_SIZE));
-        let tab_bold_fallback = std::sync::Arc::new(GlyphAtlas::load_fallback_bold_font(TAB_FONT_SIZE));
-        let tab_atlas = GlyphAtlas::with_shared_fonts(TAB_FONT_SIZE, std::sync::Arc::new(GlyphAtlas::load_builtin_font(TAB_FONT_SIZE)), fallback_font, tab_bold_font, tab_bold_fallback);
+        let fonts = LazyFonts::default();
+        let atlas = GlyphAtlas::with_shared_fonts(font_size, font, fonts.clone());
+        let tab_font = std::sync::Arc::new(GlyphAtlas::load_builtin_font(TAB_FONT_SIZE));
+        let tab_atlas = GlyphAtlas::with_shared_fonts(TAB_FONT_SIZE, tab_font, fonts);
 
         Self {
             device,

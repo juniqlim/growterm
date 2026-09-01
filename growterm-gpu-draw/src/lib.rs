@@ -2,7 +2,7 @@ mod atlas;
 mod platform_font;
 mod renderer;
 
-pub use atlas::GlyphAtlas;
+pub use atlas::{GlyphAtlas, LazyFonts};
 pub use platform_font::FontCandidates;
 pub use renderer::{GpuDrawer, TabBarInfo};
 
