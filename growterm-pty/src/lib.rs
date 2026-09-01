@@ -18,7 +18,28 @@ impl io::Read for PtyReader {
 pub struct PtyWriter {
     writer: Arc<Mutex<Box<dyn io::Write + Send>>>,
     master: Box<dyn portable_pty::MasterPty + Send>,
-    _child: Box<dyn portable_pty::Child + Send + Sync>,
+    child: Option<Box<dyn portable_pty::Child + Send + Sync>>,
+}
+
+/// A closed tab has to take its shell with it. Dropping the pty is not enough:
+/// the IO thread still holds a reader cloned off the master, so the shell never
+/// sees the hangup and lives on with whatever it was running.
+impl Drop for PtyWriter {
+    fn drop(&mut self) {
+        let Some(mut child) = self.child.take() else {
+            return;
+        };
+        // SIGHUP rather than a kill, so the shell passes the hangup to its own
+        // jobs. A kill would leave what ran in the tab orphaned and running.
+        if let Some(pid) = child.process_id() {
+            unsafe { libc::kill(pid as libc::pid_t, libc::SIGHUP) };
+        }
+        // Reaped off the closing thread: a shell slow to hang up must not stall
+        // the window.
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+    }
 }
 
 impl io::Write for PtyWriter {
@@ -68,7 +89,7 @@ impl PtyWriter {
     }
 
     pub fn child_pid(&self) -> Option<u32> {
-        self._child.process_id()
+        self.child.as_ref()?.process_id()
     }
 
     pub fn responder(&self) -> PtyResponder {
@@ -139,7 +160,7 @@ pub fn spawn_with_cwd(
         PtyWriter {
             writer: shared_writer,
             master: pair.master,
-            _child: child,
+            child: Some(child),
         },
     ))
 }
@@ -204,6 +225,81 @@ fn build_shell_command(shell: &str) -> CommandBuilder {
 #[cfg(test)]
 mod tests {
     use std::ffi::OsStr;
+
+    fn child_of(pid: u32) -> Option<u32> {
+        let out = std::process::Command::new("pgrep")
+            .args(["-P", &pid.to_string()])
+            .output()
+            .ok()?;
+        String::from_utf8_lossy(&out.stdout)
+            .split_whitespace()
+            .next()?
+            .parse()
+            .ok()
+    }
+
+    fn alive(pid: u32) -> bool {
+        unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+    }
+
+    fn poll<T>(mut f: impl FnMut() -> Option<T>) -> Option<T> {
+        for _ in 0..100 {
+            if let Some(v) = f() {
+                return Some(v);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        None
+    }
+
+    #[test]
+    fn dropping_the_writer_takes_the_running_job_with_it() {
+        use std::io::{Read, Write};
+
+        let (mut reader, mut writer) = super::spawn(24, 80).unwrap();
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 4096];
+            while let Ok(n) = reader.read(&mut buf) {
+                if n == 0 {
+                    break;
+                }
+            }
+        });
+
+        let shell = writer.child_pid().expect("셸 pid");
+        writer.write_all(b"sleep 300\n").unwrap();
+        writer.flush().unwrap();
+        let job = poll(|| child_of(shell)).expect("sleep 이 떠야 한다");
+
+        drop(writer);
+
+        assert!(
+            poll(|| (!alive(job)).then_some(())).is_some(),
+            "탭을 닫으면 그 안에서 돌던 것도 끝나야 한다 (pid {job})"
+        );
+    }
+
+    #[test]
+    fn dropping_the_writer_hangs_up_the_shell() {
+        use std::io::Read;
+
+        let (mut reader, writer) = super::spawn(24, 80).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 4096];
+            while let Ok(n) = reader.read(&mut buf) {
+                if n == 0 {
+                    break;
+                }
+            }
+            let _ = tx.send(());
+        });
+
+        drop(writer);
+
+        rx.recv_timeout(std::time::Duration::from_secs(5))
+            .expect("탭을 닫으면 셸이 끝나고 읽기 쪽이 EOF 를 받아야 한다");
+    }
 
     #[test]
     fn child_cwd_returns_cwd_of_spawned_shell() {
