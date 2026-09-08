@@ -169,11 +169,70 @@ pub fn extract_text(cells: &[Vec<Cell>], selection: &Selection) -> String {
     result
 }
 
-/// Extract the input line text from the logical line around the cursor.
+/// Claude Code draws its input as a box: a `─` separator, a `❯` prompt row
+/// (the prompt is followed by a no-break space), continuation rows indented
+/// under the text, then another separator. The screen keeps no wrap flags,
+/// so this shape is what marks the box.
+const INPUT_PROMPT: char = '❯';
+const INPUT_INDENT: &str = "  ";
+
+fn is_separator_row(line: &[Cell]) -> bool {
+    line.first().is_some_and(|c| c.character == '─')
+}
+
+fn is_prompt_row(cells: &[Vec<Cell>], row: usize) -> bool {
+    row > 0 && is_separator_row(&cells[row - 1]) && strip_prompt(&collect_line_text(&cells[row])).is_some()
+}
+
+fn strip_prompt(text: &str) -> Option<&str> {
+    let mut chars = text.chars();
+    (chars.next() == Some(INPUT_PROMPT) && chars.next().is_some_and(char::is_whitespace))
+        .then(|| chars.as_str())
+}
+
+/// The rows of the input box the cursor sits in: from its prompt row to the
+/// last row before the lower separator, or the screen bottom.
+fn input_box_rows(cells: &[Vec<Cell>], cursor_row: usize) -> Option<(usize, usize)> {
+    let start = (0..=cursor_row)
+        .rev()
+        .take_while(|&row| row == cursor_row || !is_separator_row(&cells[row]))
+        .find(|&row| is_prompt_row(cells, row))?;
+    let mut end = cursor_row;
+    while end + 1 < cells.len() && !is_separator_row(&cells[end + 1]) {
+        end += 1;
+    }
+    while end > cursor_row && collect_line_text(&cells[end]).trim().is_empty() {
+        end -= 1;
+    }
+    Some((start, end))
+}
+
+/// The box text as the user typed it: prompt and indent stripped, one line
+/// per row.
+fn input_box_text(cells: &[Vec<Cell>], start: usize, end: usize) -> String {
+    (start..=end)
+        .map(|row| {
+            let text = collect_line_text(&cells[row]);
+            let stripped = if row == start {
+                strip_prompt(&text)
+            } else {
+                text.strip_prefix(INPUT_INDENT)
+            };
+            stripped.unwrap_or(&text).trim_end().to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Extract the input text: the input box around the cursor when a TUI drew
+/// one, otherwise the logical line around the cursor.
 /// Returns (text, flash_start, flash_end) in screen rows.
 pub fn input_line_text(grid: &growterm_grid::Grid) -> (String, u16, u16) {
     let row = grid.cursor_pos().0 as usize;
     let cells = grid.cells();
+    if let Some((start, end)) = input_box_rows(cells, row) {
+        return (input_box_text(cells, start, end), start as u16, end as u16);
+    }
     let mut start = row;
     while start > 0 && is_row_wrapped(&cells[start - 1]) {
         start -= 1;
@@ -757,6 +816,73 @@ mod tests {
         assert_eq!(text, "helloworld!");
         assert_eq!(flash_start, 0);
         assert_eq!(flash_end, 1);
+    }
+
+    /// Lay `lines` out on a grid, one per row, and leave the cursor at
+    /// (row, col) with both counted from zero.
+    fn grid_with_cursor(lines: &[&str], row: u16, col: u16) -> growterm_grid::Grid {
+        use growterm_grid::Grid;
+        use growterm_types::TerminalCommand;
+
+        let mut grid = Grid::new(40, lines.len() as u16 + 1);
+        for (i, line) in lines.iter().enumerate() {
+            grid.apply(&TerminalCommand::CursorPosition { row: i as u16 + 1, col: 1 });
+            for c in line.chars() {
+                grid.apply(&TerminalCommand::Print(c));
+            }
+        }
+        grid.apply(&TerminalCommand::CursorPosition { row: row + 1, col: col + 1 });
+        grid
+    }
+
+    #[test]
+    fn input_line_text_copies_the_whole_claude_input_box() {
+        let grid = grid_with_cursor(
+            &["output", "──────", "❯ first line", "  second line", "──────", "status"],
+            3,
+            13,
+        );
+
+        let (text, flash_start, flash_end) = input_line_text(&grid);
+        assert_eq!(text, "first line\nsecond line");
+        assert_eq!((flash_start, flash_end), (2, 3));
+    }
+
+    #[test]
+    fn input_line_text_copies_the_box_from_its_prompt_row() {
+        let grid = grid_with_cursor(&["──────", "❯ first line", "  second line", "──────"], 1, 5);
+
+        let (text, _, _) = input_line_text(&grid);
+        assert_eq!(text, "first line\nsecond line");
+    }
+
+    #[test]
+    fn input_line_text_keeps_the_indent_the_user_typed() {
+        let grid = grid_with_cursor(&["──────", "❯ fn main() {", "      body", "  }", "──────"], 2, 10);
+
+        let (text, _, _) = input_line_text(&grid);
+        assert_eq!(text, "fn main() {\n    body\n}");
+    }
+
+    #[test]
+    fn input_line_text_ignores_an_old_prompt_echoed_in_the_transcript() {
+        // Claude Code echoes submitted prompts as "❯ text" without a separator
+        // above them; the shell line the cursor sits on is what to copy.
+        let grid = grid_with_cursor(&["❯ old prompt", "answer", "$ ls -la"], 2, 8);
+
+        let (text, flash_start, flash_end) = input_line_text(&grid);
+        assert_eq!(text, "$ ls -la");
+        assert_eq!((flash_start, flash_end), (2, 2));
+    }
+
+    #[test]
+    fn input_line_text_stops_at_the_screen_bottom_without_a_lower_separator() {
+        // Claude Code puts a no-break space after the prompt.
+        let grid = grid_with_cursor(&["──────", "❯\u{a0}only line"], 1, 11);
+
+        let (text, flash_start, flash_end) = input_line_text(&grid);
+        assert_eq!(text, "only line");
+        assert_eq!((flash_start, flash_end), (1, 1));
     }
 
     #[test]
