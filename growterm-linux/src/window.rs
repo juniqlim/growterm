@@ -254,53 +254,27 @@ where
                     PhysicalKey::Unidentified(_) => None,
                 };
                 let characters = event.text.as_ref().map(|text| text.to_string());
-                let mut modifiers = self.current_modifiers();
-
-                let has_selection = self
-                    .window
-                    .as_ref()
-                    .map(|window| window.has_selection())
-                    .unwrap_or(false);
-                let claimed = shortcut(keycode, modifiers, has_selection);
-
-                // A composing IME owns the keyboard — except for these, which it
-                // would otherwise swallow for as long as a syllable is unfinished.
-                if self.ime_composing && claimed.is_none() {
-                    return;
-                }
-
-                match claimed {
-                    Some(Shortcut::AsSuper(remapped)) => modifiers = remapped,
-                    None => {}
-                }
-
-                let should_commit_text = event_type == growterm_types::KeyEventType::Press
-                    && !self
+                let context = KeyContext {
+                    ime_composing: self.ime_composing,
+                    has_selection: self
+                        .window
+                        .as_ref()
+                        .map(|window| window.has_selection())
+                        .unwrap_or(false),
+                    copy_mode: self
                         .window
                         .as_ref()
                         .map(|window| window.copy_mode_enabled())
-                        .unwrap_or(false)
-                    && !modifiers
-                        .intersects(Modifiers::CONTROL | Modifiers::ALT | Modifiers::SUPER)
-                    && characters
-                        .as_deref()
-                        .map(|text| text.chars().all(|c| !c.is_control()))
-                        .unwrap_or(false);
-
-                if should_commit_text {
-                    if let Some(text) = characters {
-                        self.send(AppEvent::TextCommit(text));
-                    }
-                    return;
-                }
-
-                if let Some(keycode) = keycode {
-                    self.send(AppEvent::KeyInput {
-                        keycode,
-                        characters,
-                        modifiers,
-                        event_type,
-                    });
+                        .unwrap_or(false),
+                };
+                if let Some(event) = key_event(
+                    keycode,
+                    characters,
+                    self.current_modifiers(),
+                    event_type,
+                    context,
+                ) {
+                    self.send(event);
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
@@ -368,6 +342,55 @@ pub fn run(
         ime_composing: false,
     };
     event_loop.run_app(&mut app).expect("run linux event loop");
+}
+
+/// What the window is doing when a key arrives.
+#[derive(Debug, Clone, Copy)]
+struct KeyContext {
+    ime_composing: bool,
+    has_selection: bool,
+    copy_mode: bool,
+}
+
+/// What a key becomes for growterm-app: text to commit, a key to handle, or nothing.
+fn key_event(
+    keycode: Option<u16>,
+    characters: Option<String>,
+    mut modifiers: Modifiers,
+    event_type: growterm_types::KeyEventType,
+    context: KeyContext,
+) -> Option<AppEvent> {
+    let claimed = shortcut(keycode, modifiers, context.has_selection);
+
+    // A composing IME owns the keyboard — except for these, which it
+    // would otherwise swallow for as long as a syllable is unfinished.
+    if context.ime_composing && claimed.is_none() {
+        return None;
+    }
+
+    match claimed {
+        Some(Shortcut::AsSuper(remapped)) => modifiers = remapped,
+        None => {}
+    }
+
+    let is_text = event_type == growterm_types::KeyEventType::Press
+        && !context.copy_mode
+        && !modifiers.intersects(Modifiers::CONTROL | Modifiers::ALT | Modifiers::SUPER)
+        && characters
+            .as_deref()
+            .map(|text| text.chars().all(|c| !c.is_control()))
+            .unwrap_or(false);
+
+    if is_text {
+        return characters.map(AppEvent::TextCommit);
+    }
+
+    Some(AppEvent::KeyInput {
+        keycode: keycode?,
+        characters,
+        modifiers,
+        event_type,
+    })
 }
 
 /// What this crate does with a modified key press.
@@ -495,6 +518,122 @@ mod tests {
             Some(Shortcut::AsSuper(m)) => m,
             other => panic!("expected a remap, got {other:?}"),
         }
+    }
+
+    use growterm_types::KeyEventType;
+
+    const IDLE: KeyContext = KeyContext {
+        ime_composing: false,
+        has_selection: false,
+        copy_mode: false,
+    };
+    const COMPOSING: KeyContext = KeyContext {
+        ime_composing: true,
+        ..IDLE
+    };
+    const COPY_MODE: KeyContext = KeyContext {
+        copy_mode: true,
+        ..IDLE
+    };
+
+    fn press(keycode: u16, text: &str, modifiers: Modifiers, context: KeyContext) -> Option<AppEvent> {
+        key_event(
+            Some(keycode),
+            Some(text.to_string()),
+            modifiers,
+            KeyEventType::Press,
+            context,
+        )
+    }
+
+    #[test]
+    fn a_typed_letter_is_committed_as_text() {
+        let event = press(kc::ANSI_A, "a", Modifiers::empty(), IDLE);
+        assert!(matches!(event, Some(AppEvent::TextCommit(text)) if text == "a"));
+    }
+
+    #[test]
+    fn a_shifted_letter_is_still_text() {
+        let event = press(kc::ANSI_A, "A", Modifiers::SHIFT, IDLE);
+        assert!(matches!(event, Some(AppEvent::TextCommit(text)) if text == "A"));
+    }
+
+    #[test]
+    fn a_composing_ime_keeps_the_key_to_itself() {
+        assert!(press(kc::ANSI_A, "a", Modifiers::empty(), COMPOSING).is_none());
+    }
+
+    #[test]
+    fn a_shortcut_gets_through_a_composing_ime() {
+        let event = press(kc::ANSI_V, "\u{16}", CTRL_SHIFT, COMPOSING);
+        assert!(matches!(
+            event,
+            Some(AppEvent::KeyInput { keycode: kc::ANSI_V, modifiers: Modifiers::SUPER, .. })
+        ));
+    }
+
+    #[test]
+    fn a_control_character_is_a_key_not_text() {
+        let event = press(kc::RETURN, "\r", Modifiers::empty(), IDLE);
+        assert!(matches!(event, Some(AppEvent::KeyInput { keycode: kc::RETURN, .. })));
+    }
+
+    #[test]
+    fn a_modified_letter_is_a_key_not_text() {
+        let event = press(kc::ANSI_F, "f", Modifiers::ALT, IDLE);
+        assert!(matches!(
+            event,
+            Some(AppEvent::KeyInput { keycode: kc::ANSI_F, modifiers: Modifiers::ALT, .. })
+        ));
+    }
+
+    #[test]
+    fn copy_mode_takes_letters_as_keys() {
+        let event = press(kc::ANSI_J, "j", Modifiers::empty(), COPY_MODE);
+        assert!(matches!(event, Some(AppEvent::KeyInput { keycode: kc::ANSI_J, .. })));
+    }
+
+    #[test]
+    fn a_released_letter_is_a_key_not_text() {
+        let event = key_event(
+            Some(kc::ANSI_A),
+            Some("a".to_string()),
+            Modifiers::empty(),
+            KeyEventType::Release,
+            IDLE,
+        );
+        assert!(matches!(
+            event,
+            Some(AppEvent::KeyInput { event_type: KeyEventType::Release, .. })
+        ));
+    }
+
+    #[test]
+    fn ctrl_c_over_a_selection_copies_instead_of_interrupting() {
+        let selecting = KeyContext { has_selection: true, ..IDLE };
+        let event = press(kc::ANSI_C, "\u{3}", Modifiers::CONTROL, selecting);
+        assert!(matches!(
+            event,
+            Some(AppEvent::KeyInput { modifiers: Modifiers::SUPER, .. })
+        ));
+    }
+
+    #[test]
+    fn a_key_with_no_keycode_and_no_text_is_dropped() {
+        let event = key_event(None, None, Modifiers::empty(), KeyEventType::Press, IDLE);
+        assert!(event.is_none());
+    }
+
+    #[test]
+    fn text_from_a_key_with_no_keycode_is_still_committed() {
+        let event = key_event(
+            None,
+            Some("é".to_string()),
+            Modifiers::empty(),
+            KeyEventType::Press,
+            IDLE,
+        );
+        assert!(matches!(event, Some(AppEvent::TextCommit(text)) if text == "é"));
     }
 
     #[test]
